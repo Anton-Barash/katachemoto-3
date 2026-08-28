@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>wechatauto</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+header { background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1rem; display: flex; justify-content: space-between; align-items: center; }
+h1 { font-size: 1.5rem; color: #333; }
+.container { display: flex; height: calc(100vh - 70px); }
+.sidebar { width: 320px; background: white; overflow-y: auto; border-right: 1px solid #eee; }
+.main { flex: 1; display: flex; flex-direction: column; background: white; }
+.chat-item { padding: 0.75rem 1rem; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+.chat-item:hover { background: #fafafa; }
+.chat-item.active { background: #e3f2fd; }
+.chat-item.pinned { border-left: 3px solid #2196f3; }
+.chat-name { font-weight: 500; color: #111; margin-bottom: 0.25rem; }
+.chat-id { font-size: 0.8rem; color: #999; }
+.chat-last { font-size: 0.85rem; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+#messages { flex: 1; overflow-y: auto; padding: 1rem; }
+.message { margin-bottom: 0.75rem; max-width: 70%; }
+.message.self { margin-left: auto; text-align: right; }
+.message .sender { font-size: 0.75rem; color: #888; margin-bottom: 0.25rem; }
+.message .content { background: #e3f2fd; padding: 0.75rem 1rem; border-radius: 12px; display: inline-block; text-align: left; }
+.message.self .content { background: #4caf50; color: white; }
+.message .time { font-size: 0.7rem; color: #999; margin-top: 0.25rem; }
+.input-area { border-top: 1px solid #eee; padding: 1rem; display: flex; gap: 0.5rem; }
+.input-area input { flex: 1; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
+button { padding: 0.75rem 1.5rem; background: #2196f3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+button:hover { background: #1976d2; }
+.settings-btn { background: #fff; border: 1px solid #ddd; color: #333; }
+.settings-btn:hover { background: #f5f5f5; }
+.no-chat { flex: 1; display: flex; align-items: center; justify-content: center; color: #999; }
+h3 { padding: 0.75rem 1rem; border-bottom: 1px solid #eee; font-size: 0.9rem; color: #666; background: #fafafa; }
+</style>
+</head>
+<body>
+<header>
+    <h1>wechatauto</h1>
+    <button class="settings-btn" onclick="location.href='/settings'">⚙️ Настройки</button>
+</header>
+<div class="container">
+    <div class="sidebar">
+        <h3>Закрепленные</h3>
+        <div id="pinned-list"></div>
+        <h3>Все чаты</h3>
+        <div id="all-list"></div>
+    </div>
+    <div class="main" id="main-area">
+        <div class="no-chat" id="no-chat-selected">
+            Выберите чат из списка слева
+        </div>
+        <div id="messages" style="display: none;"></div>
+        <div class="input-area" id="input-area" style="display: none;">
+            <input type="text" id="message-input" placeholder="Введите сообщение...">
+            <button onclick="sendMessage()">Отправить</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentChat = null;
+let data = {{ data_json|safe }};
+let sessionsData = [...(data.groups||[]), ...(data.users||[])];
+
+if (data.db_error) {
+    console.warn("WeChat DB error:", data.db_error);
+}
+
+function renderSessions() {
+    const pinned = sessionsData.filter(s => s.is_pinned);
+    const others = sessionsData.filter(s => !s.is_pinned);
+
+    document.getElementById('pinned-list').innerHTML = pinned.map(s => `
+        <div class="chat-item ${currentChat?.username === s.username ? 'active' : ''} ${s.is_pinned ? 'pinned' : ''}"
+             onclick="selectChat('${s.username}')">
+            <div class="chat-name">${escapeHtml(s.display_name)}</div>
+            <div class="chat-id">${escapeHtml(s.username)}</div>
+            ${s.last_message ? `<div class="chat-last">${escapeHtml(s.last_message)}</div>` : ''}
+        </div>
+    `).join('');
+
+    document.getElementById('all-list').innerHTML = others.map(s => `
+        <div class="chat-item ${currentChat?.username === s.username ? 'active' : ''}"
+             onclick="selectChat('${s.username}')">
+            <div class="chat-name">${escapeHtml(s.display_name)}</div>
+            <div class="chat-id">${escapeHtml(s.username)}</div>
+            ${s.last_message ? `<div class="chat-last">${escapeHtml(s.last_message)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function selectChat(username) {
+    currentChat = sessionsData.find(s => s.username === username);
+    renderSessions();
+    await loadMessages(username);
+    document.getElementById('no-chat-selected').style.display = 'none';
+    document.getElementById('messages').style.display = 'block';
+    document.getElementById('input-area').style.display = 'flex';
+}
+
+async function loadMessages(username) {
+    const res = await fetch(`/api/messages?username=${encodeURIComponent(username)}&limit=100`);
+    const data = await res.json();
+    const container = document.getElementById('messages');
+    container.innerHTML = (data.messages||[]).map(m => `
+        <div class="message ${m.is_self ? 'self' : ''}">
+            ${!m.is_self ? `<div class="sender">${escapeHtml(m.sender)}</div>` : ''}
+            <div class="content">${escapeHtml(m.content).replace(/\\n/g, '<br>')}</div>
+            <div class="time">${m.time}</div>
+        </div>
+    `).join('');
+    container.scrollTop = container.scrollHeight;
+}
+
+async function sendMessage() {
+    if (!currentChat) return;
+    const input = document.getElementById('message-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const res = await fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentChat.username, text: text })
+    });
+    const result = await res.json();
+
+    if (result.success) {
+        input.value = '';
+        setTimeout(() => loadMessages(currentChat.username), 500);
+    } else {
+        alert('Ошибка отправки: ' + (result.error || 'unknown'));
+    }
+}
+
+document.getElementById('message-input')?.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendMessage();
+});
+
+renderSessions();
+</script>
+</body>
+</html>
