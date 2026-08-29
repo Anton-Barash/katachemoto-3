@@ -101,7 +101,9 @@ def run_analys(username: str) -> dict:
             )
 
         # 4. Отправить в LLM
-        new_analys = chat_completion(system_prompt, user_prompt)
+        llm_result = chat_completion(system_prompt, user_prompt)
+        new_analys = llm_result["content"]
+        token_usage = llm_result["usage"]
 
         # 5. Сохранить старый анализ в историю (если был)
         if current_analys:
@@ -122,6 +124,7 @@ def run_analys(username: str) -> dict:
             "analys": new_analys,
             "new_count": len(new_msgs),
             "updated_at": now_ts,
+            "token_usage": token_usage,
         }
 
     except Exception as e:
@@ -160,10 +163,12 @@ def run_meta_analys() -> dict:
         full_text = "\n\n".join(analyses_text)
 
         # 3. Отправить в LLM
-        meta_analys = chat_completion(
+        llm_result = chat_completion(
             prompts.SYSTEM_META_ANALYS,
             prompts.USER_META_ANALYS_TEMPLATE.format(analyses=full_text),
         )
+        meta_analys = llm_result["content"]
+        token_usage = llm_result["usage"]
 
         # 4. Сохранить
         db_ops.save_meta_analys(meta_analys, len(all_analyses))
@@ -174,6 +179,7 @@ def run_meta_analys() -> dict:
             "success": True,
             "analys": meta_analys,
             "chats_count": len(all_analyses),
+            "token_usage": token_usage,
         }
 
     except Exception as e:

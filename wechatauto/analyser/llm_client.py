@@ -14,15 +14,24 @@ logger = logging.getLogger(__name__)
 
 def _get_api_key() -> Optional[str]:
     """Получить API-ключ из переменной окружения."""
-    return os.getenv("ARK_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or os.getenv("LLM_API_KEY")
+    return (
+        os.getenv("DOUBAO_API_KEY")
+        or os.getenv("ARK_API_KEY")
+        or os.getenv("DEEPSEEK_API_KEY")
+        or os.getenv("LLM_API_KEY")
+    )
 
 
 def _get_api_url() -> str:
-    return os.getenv("LLM_API_URL", DEFAULT_API_URL)
+    url = os.getenv("DOUBAO_BASE_URL") or os.getenv("LLM_API_URL") or DEFAULT_API_URL
+    # Добавить /chat/completions если не указан
+    if not url.rstrip("/").endswith("/chat/completions"):
+        url = url.rstrip("/") + "/chat/completions"
+    return url
 
 
 def _get_model() -> str:
-    return os.getenv("LLM_MODEL", DEFAULT_MODEL)
+    return os.getenv("DOUBAO_MODEL") or os.getenv("LLM_MODEL") or DEFAULT_MODEL
 
 
 def chat_completion(
@@ -30,8 +39,8 @@ def chat_completion(
     user_prompt: str,
     temperature: float = 0.3,
     max_tokens: int = 2048,
-) -> str:
-    """Отправить запрос к LLM и получить текстовый ответ.
+) -> dict:
+    """Отправить запрос к LLM и получить текстовый ответ + usage.
 
     Args:
         system_prompt: Системный промпт.
@@ -40,7 +49,7 @@ def chat_completion(
         max_tokens: Максимум токенов в ответе.
 
     Returns:
-        Текст ответа от LLM.
+        {"content": str, "usage": {"prompt_tokens": int, "completion_tokens": int, "total_tokens": int}}
 
     Raises:
         RuntimeError: Если API недоступен или вернул ошибку.
@@ -77,8 +86,20 @@ def chat_completion(
         resp.raise_for_status()
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-        logger.info("LLM response received (%d chars)", len(content))
-        return content.strip()
+        usage = data.get("usage", {})
+        logger.info(
+            "LLM response received (%d chars, %d tokens)",
+            len(content),
+            usage.get("total_tokens", 0),
+        )
+        return {
+            "content": content.strip(),
+            "usage": {
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+        }
     except requests.exceptions.Timeout:
         raise RuntimeError("LLM API timeout after 120s")
     except requests.exceptions.RequestException as e:

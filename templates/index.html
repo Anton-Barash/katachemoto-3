@@ -81,19 +81,45 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .view-toggle button.active { background: #2196f3; color: white; }
 .view-toggle button:hover:not(.active) { background: #d0d0d0; }
 /* Analysis content */
-#analys-content { display: none; flex: 1; overflow-y: auto; padding: 1rem; }
+#analys-content { display: none; flex: 1; overflow-y: auto; padding: 1rem 1.25rem; }
 #analys-content.show { display: block; }
-#analys-content .analys-text { white-space: pre-wrap; font-size: 0.9rem; line-height: 1.5; }
+#analys-content .analys-text { font-size: 0.92rem; line-height: 1.6; color: #2c3e50; }
 #analys-content .analys-text a { color: #2196f3; text-decoration: none; }
 #analys-content .analys-text a:hover { text-decoration: underline; }
 #analys-content .analys-empty { color: #999; text-align: center; padding: 2rem; }
 #analys-content .analys-error { color: #c62828; padding: 1rem; }
 #analys-content .analys-loading { text-align: center; padding: 2rem; color: #666; }
 #analys-content .analys-loading::after { content: ''; display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #2196f3; border-radius: 50%; animation: spin 0.6s linear infinite; margin-left: 8px; vertical-align: middle; }
+/* Markdown rendering */
+.md-body { font-size: 0.92rem; line-height: 1.6; color: #2c3e50; word-wrap: break-word; }
+.md-body h1 { font-size: 1.3rem; margin: 0.9rem 0 0.5rem; padding-bottom: 0.3rem; border-bottom: 2px solid #e3f2fd; color: #0d47a1; }
+.md-body h2 { font-size: 1.15rem; margin: 0.85rem 0 0.4rem; color: #1565c0; }
+.md-body h3 { font-size: 1.02rem; margin: 0.7rem 0 0.35rem; color: #1976d2; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: 0.95rem; margin: 0.6rem 0 0.3rem; color: #37474f; }
+.md-body p { margin: 0.45rem 0; }
+.md-body ul, .md-body ol { margin: 0.4rem 0; padding-left: 1.5rem; }
+.md-body li { margin: 0.2rem 0; }
+.md-body li > ul, .md-body li > ol { margin: 0.15rem 0; }
+.md-body strong { color: #111; font-weight: 600; }
+.md-body em { color: #455a64; }
+.md-body code { background: #f4f6f8; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85rem; font-family: 'Consolas', 'Monaco', monospace; color: #d63384; }
+.md-body pre { background: #263238; color: #eceff1; padding: 0.75rem 1rem; border-radius: 8px; overflow-x: auto; margin: 0.6rem 0; }
+.md-body pre code { background: none; color: inherit; padding: 0; font-size: 0.85rem; }
+.md-body blockquote { border-left: 3px solid #2196f3; background: #f0f7ff; padding: 0.4rem 0.8rem; margin: 0.5rem 0; border-radius: 0 6px 6px 0; color: #455a64; }
+.md-body blockquote p { margin: 0.2rem 0; }
+.md-body hr { border: none; border-top: 1px solid #e0e0e0; margin: 0.9rem 0; }
+.md-body table.md-table { border-collapse: collapse; width: 100%; margin: 0.6rem 0; font-size: 0.88rem; display: block; overflow-x: auto; }
+.md-body table.md-table th, .md-body table.md-table td { border: 1px solid #e0e0e0; padding: 0.4rem 0.65rem; text-align: left; }
+.md-body table.md-table th { background: #f5f8fa; font-weight: 600; color: #333; }
+.md-body table.md-table tr:nth-child(even) td { background: #fafbfc; }
+.md-body a { color: #2196f3; text-decoration: none; }
+.md-body a:hover { text-decoration: underline; }
+/* Token usage badge */
+.token-usage { font-size: 0.75rem; color: #888; text-align: right; padding: 0.5rem 1rem; border-top: 1px solid #f0f0f0; margin-top: 0.5rem; }
 /* Meta analys banner */
 .meta-analys-banner { display: none; padding: 1rem; border-bottom: 1px solid #eee; }
 .meta-analys-banner.show { display: block; }
-.meta-analys-banner .meta-text { white-space: pre-wrap; font-size: 0.9rem; line-height: 1.5; }
+.meta-analys-banner .meta-text { font-size: 0.92rem; line-height: 1.6; }
 .meta-analys-banner .meta-text a { color: #2196f3; text-decoration: none; }
 .meta-analys-banner .meta-text a:hover { text-decoration: underline; }
 .meta-analys-banner .meta-close { float: right; background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #999; padding: 0 0.25rem; }
@@ -157,7 +183,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
         <!-- Meta analys result banner -->
         <div class="meta-analys-banner" id="meta-analys-banner">
             <button class="meta-close" onclick="closeMetaAnalys()">&times;</button>
-            <div class="meta-text" id="meta-analys-text"></div>
+            <div class="meta-text md-body" id="meta-analys-text"></div>
         </div>
 
         <!-- Messages view -->
@@ -166,7 +192,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
         <!-- Analysis view -->
         <div id="analys-content">
             <div class="analys-empty" id="analys-empty">Выберите чат, чтобы увидеть анализ</div>
-            <div class="analys-text" id="analys-text" style="display:none;"></div>
+            <div class="analys-text md-body" id="analys-text" style="display:none;"></div>
             <div class="analys-loading" id="analys-loading" style="display:none;">Выполнение анализа</div>
             <div class="analys-error" id="analys-error" style="display:none;"></div>
         </div>
@@ -180,7 +206,8 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 <script>
 let currentChat = null;
-let data = {{ data_json|safe }};
+// let data = {{ data_json|safe }};
+let data = {};
 let searchQuery = '';
 let promptData = null;
 let currentView = 'chat'; // 'chat' or 'analys'
@@ -549,6 +576,10 @@ async function loadAnalysView(username) {
         if (data.analys) {
             textEl.innerHTML = renderAnalysText(data.analys, username);
             textEl.style.display = 'block';
+            // Add token usage badge
+            if (data.token_usage) {
+                textEl.innerHTML += '<div class="token-usage">🔤 ' + data.token_usage.prompt_tokens + ' → ' + data.token_usage.completion_tokens + ' = ' + data.token_usage.total_tokens + ' токенов</div>';
+            }
         } else {
             emptyEl.textContent = 'Анализ пока не выполнен. Нажмите кнопку "Анализ" для запуска.';
             emptyEl.style.display = 'block';
@@ -560,19 +591,154 @@ async function loadAnalysView(username) {
 }
 
 function renderAnalysText(text, chatUsername) {
-    // Escape HTML first, then convert links
-    let html = escapeHtml(text);
-    // Convert [#msg:ID] to clickable links
-    html = html.replace(/\[#msg:(\d+)\]/g, (match, msgId) => {
-        return `<a href="#" onclick="scrollToMessage('${msgId}'); return false;" title="Перейти к сообщению #${msgId}">[#msg:${msgId}]</a>`;
+    return renderMarkdown(text);
+}
+
+// ─── Лёгкий Markdown-парсер (без внешних зависимостей) ─────────
+
+function renderMarkdown(src) {
+    if (!src) return '';
+
+    // 1. Вырезаем блоки кода ```...```
+    const codeBlocks = [];
+    src = src.replace(/```[^\n]*\n?([\s\S]*?)```/g, (m, code) => {
+        codeBlocks.push('<pre><code>' + escapeHtml(code.replace(/\n$/, '')) + '</code></pre>');
+        return '\n\u0000CODE' + (codeBlocks.length - 1) + '\u0000\n';
     });
-    // Convert [chat:username] to clickable links
-    html = html.replace(/\[chat:([^\]]+)\]/g, (match, chatUser) => {
-        return `<a href="#" onclick="selectChat('${escapeHtml(chatUser)}'); return false;" title="Перейти к чату">[${escapeHtml(chatUser)}]</a>`;
-    });
-    // Convert newlines to <br>
-    html = html.replace(/\n/g, '<br>');
+
+    const lines = src.split('\n');
+    let html = '';
+    let i = 0;
+
+    const isSpecial = (ln) =>
+        /^\s*\u0000CODE\d+\u0000\s*$/.test(ln) ||
+        /^(#{1,6})\s+/.test(ln) ||
+        /^\s*[-*+]\s+/.test(ln) ||
+        /^\s*\d+\.\s+/.test(ln) ||
+        /^>/.test(ln) ||
+        /^\s*\|.*\|\s*$/.test(ln) ||
+        /^\s*([-*_])(\s*\1){2,}\s*$/.test(ln);
+
+    while (i < lines.length) {
+        const line = lines[i];
+
+        // Код-блок
+        const cm = line.match(/^\s*\u0000CODE(\d+)\u0000\s*$/);
+        if (cm) { html += codeBlocks[+cm[1]]; i++; continue; }
+
+        // Заголовки
+        const hm = line.match(/^(#{1,6})\s+(.*)$/);
+        if (hm) {
+            const lvl = hm[1].length;
+            html += `<h${lvl}>${mdInline(hm[2])}</h${lvl}>`;
+            i++; continue;
+        }
+
+        // Горизонтальная линия
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { html += '<hr>'; i++; continue; }
+
+        // Таблицы: | a | b |  /  |---|---|
+        if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length
+            && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i+1]) && lines[i+1].includes('-')) {
+            const headers = line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+            i += 2;
+            const rows = [];
+            while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+                rows.push(lines[i].trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+                i++;
+            }
+            let t = '<table class="md-table"><thead><tr>'
+                + headers.map(h => '<th>' + mdInline(h) + '</th>').join('')
+                + '</tr></thead><tbody>';
+            for (const r of rows) {
+                t += '<tr>' + headers.map((_, col) => '<td>' + mdInline(r[col] || '') + '</td>').join('') + '</tr>';
+            }
+            html += t + '</tbody></table>';
+            continue;
+        }
+
+        // Цитаты
+        if (/^>\s?/.test(line)) {
+            const buf = [];
+            while (i < lines.length && /^>\s?/.test(lines[i])) {
+                buf.push(lines[i].replace(/^>\s?/, ''));
+                i++;
+            }
+            html += '<blockquote>' + mdInline(buf.join(' ')) + '</blockquote>';
+            continue;
+        }
+
+        // Маркированные списки
+        if (/^\s*[-*+]\s+/.test(line)) {
+            const items = [];
+            while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+                items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+                i++;
+            }
+            html += '<ul>' + items.map(t => '<li>' + mdInline(t) + '</li>').join('') + '</ul>';
+            continue;
+        }
+
+        // Нумерованные списки
+        if (/^\s*\d+\.\s+/.test(line)) {
+            const items = [];
+            while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+                items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+                i++;
+            }
+            html += '<ol>' + items.map(t => '<li>' + mdInline(t) + '</li>').join('') + '</ol>';
+            continue;
+        }
+
+        // Пустая строка
+        if (/^\s*$/.test(line)) { i++; continue; }
+
+        // Абзац: собираем подряд идущие обычные строки
+        const buf = [];
+        while (i < lines.length && !/^\s*$/.test(lines[i]) && !isSpecial(lines[i])) {
+            buf.push(lines[i]);
+            i++;
+        }
+        if (buf.length) html += '<p>' + buf.map(mdInline).join('<br>') + '</p>';
+    }
+
     return html;
+}
+
+function mdInline(text) {
+    let s = escapeHtml(text);
+
+    // Спец-ссылки WeChat: [#msg:ID] и [chat:username] — защищаем плейсхолдерами
+    const specials = [];
+    s = s.replace(/\[#msg:(\d+)\]/g, (m, id) => {
+        specials.push(`<a href="#" onclick="scrollToMessage('${id}');return false;" title="Перейти к сообщению #${id}">[#msg:${id}]</a>`);
+        return '\u0001S' + (specials.length - 1) + '\u0001';
+    });
+    s = s.replace(/\[chat:([^\]]+)\]/g, (m, u) => {
+        specials.push(`<a href="#" onclick="selectChat('${u}');return false;" title="Перейти к чату">[${u}]</a>`);
+        return '\u0001S' + (specials.length - 1) + '\u0001';
+    });
+
+    // Inline-код — защищаем от остальной обработки
+    const codes = [];
+    s = s.replace(/`([^`]+)`/g, (m, c) => {
+        codes.push('<code>' + c + '</code>');
+        return '\u0001C' + (codes.length - 1) + '\u0001';
+    });
+
+    // Жирный
+    s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+    // Курсив
+    s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
+    // Ссылки [текст](url)
+    s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+    // Восстанавливаем код и спец-ссылки
+    s = s.replace(/\u0001C(\d+)\u0001/g, (m, n) => codes[+n]);
+    s = s.replace(/\u0001S(\d+)\u0001/g, (m, n) => specials[+n]);
+    return s;
 }
 
 function scrollToMessage(msgId) {
@@ -594,10 +760,36 @@ async function runAnalys() {
 
     const btn = document.getElementById('run-analys-btn');
     btn.disabled = true;
-    btn.textContent = 'Анализ...';
+    btn.textContent = 'Проверка...';
     btn.classList.add('loading');
 
     try {
+        // 1. Сначала проверить, есть ли новые сообщения
+        const countRes = await fetch(`/api/unprocessed_count?username=${encodeURIComponent(currentChat.username)}`);
+        const countData = await countRes.json();
+        const newCount = countData.count || 0;
+
+        if (newCount === 0) {
+            // Нет новых сообщений — показать готовый анализ
+            btn.disabled = false;
+            btn.textContent = 'Анализ';
+            btn.classList.remove('loading');
+
+            const status = document.getElementById('sync-status');
+            status.textContent = '✅ Нет новых сообщений для анализа';
+            setTimeout(() => updateSyncStatus(), 3000);
+
+            // Переключиться на просмотр анализа
+            if (currentView !== 'analys') {
+                switchView('analys');
+            }
+            loadAnalysView(currentChat.username);
+            return;
+        }
+
+        // 2. Есть новые сообщения — запустить анализ
+        btn.textContent = `Анализ (${newCount} сообщ.)...`;
+
         const res = await fetch('/api/run_analys', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -621,11 +813,11 @@ async function runAnalys() {
 
             // Show notification
             const status = document.getElementById('sync-status');
-            if (result.new_count > 0) {
-                status.textContent = `✅ Анализ завершён (${result.new_count} сообщ.)`;
-            } else {
-                status.textContent = result.message || '✅ Анализ завершён';
+            let statusMsg = `✅ Анализ завершён (${result.new_count} сообщ.)`;
+            if (result.token_usage) {
+                statusMsg += ` 🔤 ${result.token_usage.total_tokens} токенов`;
             }
+            status.textContent = statusMsg;
             setTimeout(() => updateSyncStatus(), 3000);
 
             // Show meta analys button if this was the first
@@ -665,6 +857,9 @@ async function runMetaAnalys() {
             const banner = document.getElementById('meta-analys-banner');
             const text = document.getElementById('meta-analys-text');
             text.innerHTML = renderAnalysText(result.analys, '');
+            if (result.token_usage) {
+                text.innerHTML += '<div class="token-usage">🔤 ' + result.token_usage.prompt_tokens + ' → ' + result.token_usage.completion_tokens + ' = ' + result.token_usage.total_tokens + ' токенов</div>';
+            }
             banner.classList.add('show');
         } else {
             alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
@@ -944,7 +1139,7 @@ async function openAnalysisHistory(username) {
                     #${i+1} — ${a.created_at ? new Date(a.created_at).toLocaleString() : '?'}
                     ${a.message_count ? `· ${a.message_count} сообщ.` : ''}
                 </div>
-                <div style="white-space:pre-wrap;font-size:0.9rem;line-height:1.4;">${escapeHtml(a.analysis)}</div>
+                <div class="md-body">${renderMarkdown(a.analysis)}</div>
             </div>
         `).join('');
     } catch (e) {
@@ -977,7 +1172,7 @@ function openMetaAnalysesHistory() {
                         #${i+1} — ${a.created_at ? new Date(a.created_at).toLocaleString() : '?'}
                         ${a.chats_analyzed ? `· ${a.chats_analyzed} чатов` : ''}
                     </div>
-                    <div style="white-space:pre-wrap;font-size:0.9rem;line-height:1.4;">${escapeHtml(a.analysis)}</div>
+                    <div class="md-body">${renderMarkdown(a.analysis)}</div>
                 </div>
             `).join('');
         })
