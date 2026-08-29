@@ -9,10 +9,17 @@ dist/
 *.egg-info/
 .eggs/
 
+# Environment variables (API keys, secrets)
+.env
+
 # Runtime logs
 wxauto_logs/
+wechatauto_logs/
 @AutomationLog.txt
 *.log
+
+# Temporary dependencies (installed via pip --target)
+_deps/
 
 # Virtual environments
 .venv/

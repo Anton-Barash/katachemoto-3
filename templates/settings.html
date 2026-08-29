@@ -31,6 +31,9 @@ input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dd
 .search-box { padding: 1rem; border-bottom: 1px solid #eee; }
 .search-box input { width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
 .pinned-col { width: 60px; text-align: center; }
+.avatar-col { width: 44px; }
+.tbl-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: block; }
+.tbl-avatar-fallback { width: 32px; height: 32px; border-radius: 50%; background: #2196f3; color: white; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; }
 .name-col { width: 25%; }
 .id-col { width: 20%; }
 .lastmsg-col { width: 35%; }
@@ -46,10 +49,13 @@ input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dd
     <h1>⚙️ Настройки чатов</h1>
     <a href="/" class="back-link">← Назад к чатам</a>
 </header>
+<div id="db-error-banner" style="display: none; background: #fff3cd; color: #856404; padding: 0.75rem 1rem; border-bottom: 1px solid #ffeeba; text-align: center; font-size: 0.9rem;"></div>
 <div class="container">
     <div class="tabs">
-        <button class="tab-btn active" data-tab="groups" onclick="switchTab('groups')">Группы</button>
-        <button class="tab-btn" data-tab="users" onclick="switchTab('users')">Пользователи</button>
+        <button class="tab-btn active" data-tab="groups" onclick="switchTab('groups')">👥 Группы</button>
+        <button class="tab-btn" data-tab="officials" onclick="switchTab('officials')">📢 Official</button>
+        <button class="tab-btn" data-tab="system" onclick="switchTab('system')">⚙️ System</button>
+        <button class="tab-btn" data-tab="users" onclick="switchTab('users')">👤 Пользователи</button>
     </div>
 
     <div id="groups" class="tab-content active">
@@ -58,14 +64,52 @@ input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dd
         </div>
         <div class="limit-row">
             <span>Показывать:</span>
-            <select id="limit-groups" onchange="renderTable('groups')">
+            <select id="limit-groups" onchange="resetLimit('groups')">
                 <option value="10">10</option>
                 <option value="25" selected>25</option>
                 <option value="45">45</option>
+                <option value="0">Все</option>
             </select>
         </div>
         <div id="groups-pinned-section" class="section-pinned"></div>
         <div id="groups-rest-section" class="section-rest"></div>
+        <div id="groups-show-more" class="show-more" style="display:none; text-align: center; padding: 0.75rem; color: #2196f3; cursor: pointer; font-size: 0.9rem;" onclick="showMore('groups')">Показать ещё</div>
+    </div>
+
+    <div id="officials" class="tab-content">
+        <div class="search-box">
+            <input type="text" id="search-officials" placeholder="🔍 Поиск по названию, ID или последнему сообщению..." oninput="filterTable('officials')">
+        </div>
+        <div class="limit-row">
+            <span>Показывать:</span>
+            <select id="limit-officials" onchange="resetLimit('officials')">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="45">45</option>
+                <option value="0">Все</option>
+            </select>
+        </div>
+        <div id="officials-pinned-section" class="section-pinned"></div>
+        <div id="officials-rest-section" class="section-rest"></div>
+        <div id="officials-show-more" class="show-more" style="display:none; text-align: center; padding: 0.75rem; color: #2196f3; cursor: pointer; font-size: 0.9rem;" onclick="showMore('officials')">Показать ещё</div>
+    </div>
+
+    <div id="system" class="tab-content">
+        <div class="search-box">
+            <input type="text" id="search-system" placeholder="🔍 Поиск по названию, ID или последнему сообщению..." oninput="filterTable('system')">
+        </div>
+        <div class="limit-row">
+            <span>Показывать:</span>
+            <select id="limit-system" onchange="resetLimit('system')">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="45">45</option>
+                <option value="0">Все</option>
+            </select>
+        </div>
+        <div id="system-pinned-section" class="section-pinned"></div>
+        <div id="system-rest-section" class="section-rest"></div>
+        <div id="system-show-more" class="show-more" style="display:none; text-align: center; padding: 0.75rem; color: #2196f3; cursor: pointer; font-size: 0.9rem;" onclick="showMore('system')">Показать ещё</div>
     </div>
 
     <div id="users" class="tab-content">
@@ -74,26 +118,49 @@ input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dd
         </div>
         <div class="limit-row">
             <span>Показывать:</span>
-            <select id="limit-users" onchange="renderTable('users')">
+            <select id="limit-users" onchange="resetLimit('users')">
                 <option value="10">10</option>
                 <option value="25" selected>25</option>
                 <option value="45">45</option>
+                <option value="0">Все</option>
             </select>
         </div>
         <div id="users-pinned-section" class="section-pinned"></div>
         <div id="users-rest-section" class="section-rest"></div>
+        <div id="users-show-more" class="show-more" style="display:none; text-align: center; padding: 0.75rem; color: #2196f3; cursor: pointer; font-size: 0.9rem;" onclick="showMore('users')">Показать ещё</div>
     </div>
 </div>
 
 <script>
 let data = {{ data_json|safe }};
-let originalData = { groups: [...(data.groups||[])], users: [...(data.users||[])] };
+let originalData = { groups: [...(data.groups||[])], officials: [...(data.officials||[])], system_chats: [...(data.system_chats||[])], users: [...(data.users||[])] };
+let displayCount = { groups: 25, officials: 25, system: 25, users: 25 };
+const DATA_KEYS = { groups: 'groups', officials: 'officials', system: 'system_chats', users: 'users' };
+
+if (data.db_error) {
+    const banner = document.getElementById('db-error-banner');
+    if (banner) {
+        banner.textContent = '⚠️ ' + data.db_error;
+        banner.style.display = 'block';
+    }
+}
 
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
     document.getElementById(tab).classList.add('active');
+}
+
+function resetLimit(type) {
+    const val = parseInt(document.getElementById(`limit-${type}`).value);
+    displayCount[type] = val || 999999;
+    renderTable(type);
+}
+
+function showMore(type) {
+    displayCount[type] += 25;
+    renderTable(type);
 }
 
 function escapeHtml(text) {
@@ -105,22 +172,30 @@ function escapeHtml(text) {
 
 function renderTable(type) {
     if (!data) { setTimeout(() => renderTable(type), 300); return; }
-    const items = data[type] || [];
-    const limit = parseInt(document.getElementById(`limit-${type}`).value);
+    const dataKey = DATA_KEYS[type];
+    const items = data[dataKey] || [];
     const pinned = items.filter(i => i.is_pinned);
-    const rest = items.filter(i => !i.is_pinned).slice(0, limit);
+    const unpinned = items.filter(i => !i.is_pinned);
+    const showCount = Math.min(unpinned.length, displayCount[type]);
+    const visible = unpinned.slice(0, showCount);
 
     const pinnedSection = document.getElementById(`${type}-pinned-section`);
     const restSection = document.getElementById(`${type}-rest-section`);
+    const showMoreBtn = document.getElementById(`${type}-show-more`);
 
     function makeTable(items) {
         if (items.length === 0) return '<div class="section-title" style="border-bottom: none; color: #999; font-style: italic;">(нет)</div>';
         return `<table>` +
-            `<thead><tr><th class="pinned-col">📌</th><th class="name-col">Имя</th><th class="id-col">ID чата</th><th class="lastmsg-col">Последнее сообщение</th><th></th></tr></thead>` +
+            `<thead><tr><th class="pinned-col">📌</th><th class="avatar-col"></th><th class="name-col">Имя</th><th class="id-col">ID чата</th><th class="lastmsg-col">Последнее сообщение</th><th></th></tr></thead>` +
             `<tbody>${items.map(item => `
                 <tr data-username="${item.username}" data-search="${item.display_name} ${item.username} ${item.last_message}">
                     <td class="pinned-col" style="text-align: center;">
                         <input type="checkbox" class="checkbox" ${item.is_pinned ? 'checked' : ''} onchange="updatePinned('${item.username}', this)">
+                    </td>
+                    <td class="avatar-col">
+                        <img class="tbl-avatar" src="/api/avatar/${item.username}" alt=""
+                            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                        <div class="tbl-avatar-fallback" style="display:none">${(item.display_name||'?')[0].toUpperCase()}</div>
                     </td>
                     <td>
                         <input type="text" value="${escapeHtml(item.display_name)}" id="alias-${item.username}">
@@ -130,24 +205,61 @@ function renderTable(type) {
                     <td>
                         <button class="save-btn" onclick="saveRow('${type}', '${item.username}')">Сохранить</button>
                     </td>
-                </tr>
-            `).join('')}</tbody></table>`;
+                </tr>`).join('')}</tbody></table>`;
     }
 
+    const iconMap = {groups:'👥 Группы', officials:'📢 Официальные', system:'⚙️ Системные', users:'👤 Пользователи'};
     pinnedSection.innerHTML = `<div class="section-title">📌 Закрепленные (${pinned.length})</div>` + makeTable(pinned);
-    restSection.innerHTML = `<div class="section-title">${type === 'groups' ? 'Группы' : 'Пользователи'} (${rest.length} из ${items.length})</div>` + makeTable(rest);
+    restSection.innerHTML = `<div class="section-title">${iconMap[type]||type} (${visible.length} из ${unpinned.length})</div>` + makeTable(visible);
+
+    if (unpinned.length > showCount) {
+        showMoreBtn.style.display = 'block';
+        showMoreBtn.textContent = `Показать ещё (${unpinned.length - showCount} осталось)`;
+    } else {
+        showMoreBtn.style.display = 'none';
+    }
 }
 
-function updatePinned(username, checkbox) {
+async function updatePinned(username, checkbox) {
     const item = findItem(username);
-    if (item) {
-        item.is_pinned = checkbox.checked;
+    if (!item) return;
+    const newPinned = checkbox.checked;
+    item.is_pinned = newPinned;
+
+    // Сохраняем сразу в БД
+    checkbox.disabled = true;
+    try {
+        const res = await fetch('/api/update_pinned', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, is_pinned: newPinned })
+        });
+        const result = await res.json();
+        if (!result.success) {
+            // Откатываем на ошибке
+            item.is_pinned = !newPinned;
+            checkbox.checked = !newPinned;
+        }
+    } catch (e) {
+        item.is_pinned = !newPinned;
+        checkbox.checked = !newPinned;
+    } finally {
+        checkbox.disabled = false;
+    }
+
+    // Перерисовываем таблицу (чат переместится в закрепленные/незакрепленные)
+    for (const type of ['groups', 'officials', 'system', 'users']) {
+        const tab = document.getElementById(type);
+        if (tab && tab.classList.contains('active')) {
+            renderTable(type);
+            break;
+        }
     }
 }
 
 function findItem(username) {
-    for (const type of ['groups', 'users']) {
-        const found = (data[type]||[]).find(i => i.username === username);
+    for (const key of ['groups', 'officials', 'system_chats', 'users']) {
+        const found = (data[key]||[]).find(i => i.username === username);
         if (found) return found;
     }
     return null;
@@ -204,6 +316,8 @@ function filterTable(type) {
 }
 
 renderTable('groups');
+renderTable('officials');
+renderTable('system');
 renderTable('users');
 </script>
 </body>

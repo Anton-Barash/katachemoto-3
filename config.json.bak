@@ -1,0 +1,24 @@
+{
+  "aliases": {
+    "52122510956@chatroom": "3",
+    "wxid_kschyagjtv0t22": "二哥",
+    "wxid_t3fpsdo1bxi722": "ELTA MUSIC SIA",
+    "wxid_wyux2b5rozp612": "devices Tatyana Gorbenko",
+    "26050515887@chatroom": "Uniorange - Corpus",
+    "25814625747@chatroom": "Corpus X CleanWell VC",
+    "27924516350@chatroom": "WB  FBS",
+    "wxid_xfchyha4kgcf21": "прикольная малая"
+  },
+  "include": [],
+  "exclude": [],
+  "pinned": [
+    "52122510956@chatroom",
+    "wxid_kschyagjtv0t22",
+    "wxid_t3fpsdo1bxi722",
+    "wxid_wyux2b5rozp612",
+    "26050515887@chatroom",
+    "25814625747@chatroom",
+    "27924516350@chatroom",
+    "wxid_xfchyha4kgcf21"
+  ]
+}
