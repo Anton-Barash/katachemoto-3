@@ -131,8 +131,9 @@ input[type="text"] { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #dd
     </div>
 </div>
 
+<script id="data-json" type="application/json">{{ data_json|safe }}</script>
 <script>
-let data = {{ data_json|safe }};
+let data = JSON.parse(document.getElementById('data-json').textContent);
 let originalData = { groups: [...(data.groups||[])], officials: [...(data.officials||[])], system_chats: [...(data.system_chats||[])], users: [...(data.users||[])] };
 let displayCount = { groups: 25, officials: 25, system: 25, users: 25 };
 const DATA_KEYS = { groups: 'groups', officials: 'officials', system: 'system_chats', users: 'users' };
@@ -193,9 +194,12 @@ function renderTable(type) {
                         <input type="checkbox" class="checkbox" ${item.is_pinned ? 'checked' : ''} onchange="updatePinned('${item.username}', this)">
                     </td>
                     <td class="avatar-col">
-                        <img class="tbl-avatar" src="/api/avatar/${item.username}" alt=""
-                            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                        <div class="tbl-avatar-fallback" style="display:none">${(item.display_name||'?')[0].toUpperCase()}</div>
+                        ${type === 'groups'
+                            ? `<div class="tbl-avatar-fallback">${(item.display_name||'?')[0].toUpperCase()}</div>`
+                            : `<img class="tbl-avatar" src="/api/avatar/${item.username}" alt=""
+                                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                               <div class="tbl-avatar-fallback" style="display:none">${(item.display_name||'?')[0].toUpperCase()}</div>`
+                        }
                     </td>
                     <td>
                         <input type="text" value="${escapeHtml(item.display_name)}" id="alias-${item.username}">

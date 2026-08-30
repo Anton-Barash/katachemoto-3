@@ -15,7 +15,10 @@ import json
 import time
 import hashlib
 import os
+import re
 import logging
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(name)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s')
 
 from wechatauto import WeChatDB
 from wechatauto.guia import quick_send
@@ -178,6 +181,13 @@ def get_enriched_sessions():
             username = s["username"]
             alias = pg_aliases.get(username)
             nickname = nickname_index.get(username, "") or ""
+            # Если alias не задан — сохраняем nickname из WeChat в БД
+            if alias is None and nickname:
+                try:
+                    upsert_setting(username, alias=nickname)
+                    alias = nickname
+                except Exception:
+                    pass
             display_name = alias or nickname or username
             setting = settings.get(username)
             if setting is not None:
@@ -512,12 +522,35 @@ def api_messages():
         logging.warning("Failed to read messages for %s", username)
         return jsonify({"messages": []})
     msgs.reverse()
+    logging.debug("API messages for %s: %d messages", username, len(msgs))
+
+    # Те же никнеймы, что и в списке чатов (username -> display_name из contact.db)
+    try:
+        nick_index = db.get_nickname_index()
+    except Exception:
+        nick_index = {}
+
+    def _display(u):
+        return nick_index.get(u, u) if u else u
+
     formatted = []
     for m in msgs:
+        content = m.get("content") or f"[{m.get('type')}]"
+        sender = m.get("sender_username") or ""
+
+        # В WeChat 4.x групповые сообщения хранят настоящего отправителя
+        # в начале текста: "wxid_xxx:\nсообщение". Берём его как отправителя
+        # и убираем префикс из текста.
+        mm = re.match(r"^(wxid_[A-Za-z0-9_]+):\s*\n?", content)
+        if mm:
+            sender = mm.group(1)
+            content = content[mm.end():]
+
         formatted.append({
             "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("create_time", 0))),
-            "sender": m.get("sender_username") or m.get("sender_id", ""),
-            "content": m.get("content") or f"[{m.get('type')}]",
+            "sender": _display(sender),
+            "id": sender,
+            "content": content,
             "is_self": m.get("sender_id") == 2
         })
     return jsonify({"messages": formatted})

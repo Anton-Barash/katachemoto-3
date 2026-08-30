@@ -23,6 +23,7 @@ import glob
 import hashlib
 import hmac as hmac_mod
 import json
+import logging
 import os
 import queue
 import re
@@ -1090,6 +1091,12 @@ class WeChatDB:
         if not found:
             return []
         conn, table = found
+        # Лог: какая таблица и какой файл БД
+        db_path = getattr(conn, 'db_path', '?')
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            if row[1] == 'main':
+                db_path = row[2]
+        logging.debug("get_messages(%s): table=%s, db=%s", user, table, db_path)
         try:
             rows = conn.execute(
                 "SELECT local_id, local_type, real_sender_id, create_time, "
@@ -1190,6 +1197,11 @@ class WeChatDB:
             if not sender_username:
                 # fallback: 尝试从 contact.db 获取昵称
                 sender_username = self.get_nickname(str(sender_id))
+        # Лог для отладки: какой sender_id → какой username
+        if sender_id and sender_id not in (2,):
+            nick = self.get_nickname(sender_username) if sender_username else ""
+            logging.debug("msg local_id=%s sender_id=%s → username=%s nick=%s",
+                          r["local_id"], sender_id, sender_username, nick)
         return {
             "local_id": r["local_id"],
             "type": mtype,
