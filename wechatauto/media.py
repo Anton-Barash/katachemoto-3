@@ -373,7 +373,10 @@ class MediaDownloader:
         raise ValueError("无法识别的图片加密格式: %s" % dat_path)
 
     def _resolve_aes_key(self) -> Optional[str]:
-        """统一密钥解析：显式注入 → 本地缓存 → 内存扫描"""
+        """统一密钥解析：cfgDword派生 → 显式注入 → 本地缓存 → 内存扫描"""
+        derived = self._derive_cfg_key()
+        if derived:
+            return derived[0]
         if self._image_key and self._validate_key(self._image_key):
             return self._image_key
         cached = self._load_persisted_key()

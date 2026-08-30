@@ -39,6 +39,13 @@ from typing import Dict, List, Optional, Tuple
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+try:
+    import zstandard as _zstd
+    _ZSTD_DCTX = _zstd.ZstdDecompressor()
+except Exception:  # pragma: no cover - zstandard опционален
+    _zstd = None
+    _ZSTD_DCTX = None
+
 PAGE_SZ = 4096
 RESERVE_SZ = 80  # IV(16) + HMAC(64)
 STAMP_VERSION = 2  # 解密缓存 stamp 格式版本，改合并逻辑时递增以强制重建
@@ -75,6 +82,10 @@ MSG_TYPE_NAMES = {
     49: "文件/链接/卡片",
     10000: "系统消息",
 }
+
+# Ответ с цитированием (WeChat 4.x): тип-обёртка, реальный тип — 49 (низкий байт).
+# Тело — zstd-сжатый XML c <title> (текст ответа) и <refermsg> (цитируемое сообщение).
+MSG_TYPE_QUOTE = 244813135921
 
 
 class _MBI(ctypes.Structure):
@@ -357,10 +368,30 @@ def _decrypt_page(enc_key: bytes, page: bytes, pgno: int) -> bytes:
 def _extract_text_from_blob(content: bytes) -> Optional[str]:
     """从微信消息容器头中还原 UTF-8 明文文本。
 
-    微信 4.x 部分文本消息的 message_content 为「容器头(0x28 b5 2f fd...)
-    + UTF-8 明文 + 尾部填充(\x01\x00...)」，多数消息明文从第 10 字节开始；
-    长消息可能加密，无法还原返回 None。
+    微信 4.x 的 message_content 是 ZSTD 压缩帧（magic 0x28b52ffd），
+    解压后为 "<发送者>:\n正文"。优先尝试 ZSTD 解压；旧格式为
+    「容器头 + UTF-8 明文 + 尾部填充(\x01\x00...)」作为兜底。
     """
+    # 1) ZSTD 解压（微信 4.x 标准格式，magic 与 zstd 一致）
+    try:
+        import zstandard
+        dec = zstandard.ZstdDecompressor().decompress(
+            content, max_output_size=2_000_000)
+        try:
+            text = dec.decode("utf-8")
+        except UnicodeDecodeError:
+            text = dec.decode("utf-8", "replace")
+        cleaned = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", text).strip()
+        if cleaned:
+            printable = sum(1 for ch in cleaned if ch.isprintable() or ch in "\n\t")
+            if printable / max(1, len(cleaned)) >= 0.6:
+                return cleaned
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # 2) 兜底：容器头 + 明文 + 填充
     def _try_off(off: int) -> Optional[str]:
         if off >= len(content):
             return None
@@ -432,6 +463,7 @@ class WeChatDB:
         self.keys_file = keys_file or os.path.join(self.workdir, "keys.json")
         self._keys: Dict[str, bytes] = {}
         self._db_files = self._collect_db_files()
+        self._fts_cache: Optional[Dict[Tuple[int, int], str]] = None
         self.master_key: Optional[str] = None
         self.cfg_dword: Optional[int] = None
         self._load_or_extract_keys(master_key=master_key)
@@ -901,7 +933,12 @@ class WeChatDB:
             else:
                 applied = old["applied"]
             if wal_path and wal_size > self.WAL_HEADER_SZ:
-                applied = self._merge_wal(dst, wal_path, key, applied)
+                try:
+                    applied = self._merge_wal(dst, wal_path, key, applied)
+                except (struct.error, RuntimeError, OSError, IndexError):
+                    # 并发/截断导致合并结果损坏 → 置空 old，走全量重建重试
+                    old = None
+                    applied = 0
             else:
                 applied = 0
             if self._check_merged(dst):
@@ -1097,16 +1134,25 @@ class WeChatDB:
             if row[1] == 'main':
                 db_path = row[2]
         logging.debug("get_messages(%s): table=%s, db=%s", user, table, db_path)
+        rows = conn.execute(
+            "SELECT local_id, local_type, real_sender_id, create_time, "
+            "message_content, source, packed_info_data, server_id, sort_seq "
+            "FROM %s ORDER BY sort_seq DESC LIMIT ? OFFSET ?" % table,
+            (limit, offset),
+        ).fetchall()
+        # строим початовую карту отправителей из уже открытого conn (не переоткрываем БД)
         try:
-            rows = conn.execute(
-                "SELECT local_id, local_type, real_sender_id, create_time, "
-                "message_content, source, packed_info_data, sort_seq "
-                "FROM %s ORDER BY sort_seq DESC LIMIT ? OFFSET ?" % table,
-                (limit, offset),
-            ).fetchall()
+            chat_senders = self._build_chat_sender_index(conn, table)
+            dicts = [self._msg_row_to_dict(r, user, chat_senders) for r in rows]
+            # исходные сообщения цитат (по server_id) — пока соединение открыто
+            self._resolve_quote_targets(conn, table, dicts)
+        except Exception:
+            logging.warning("chat_sender_index(%s) failed, fallback to global", user, exc_info=True)
+            chat_senders = {}
+            dicts = [self._msg_row_to_dict(r, user, chat_senders) for r in rows]
         finally:
             conn.close()
-        return [self._msg_row_to_dict(r) for r in rows]
+        return dicts
 
     def get_message_row(self, user: str, local_id: int) -> Optional[dict]:
         """按 local_id 读取一条消息的完整原始字段（媒体下载用，含 server_id/packed_info）"""
@@ -1128,8 +1174,9 @@ class WeChatDB:
         sender_id = row["real_sender_id"]
         sender_username = ""
         if sender_id and sender_id != 2:
-            sender_index = self._sender_id_index()
-            sender_username = sender_index.get(int(sender_id), "")
+            sender_username = self._chat_sender_index(user).get(int(sender_id), "")
+            if not sender_username:
+                sender_username = self._sender_id_index().get(int(sender_id), "")
             if not sender_username:
                 # fallback: 尝试从 contact.db 获取昵称
                 sender_username = self.get_nickname(str(sender_id))
@@ -1176,24 +1223,48 @@ class WeChatDB:
         try:
             rows = conn.execute(
                 "SELECT local_id, local_type, real_sender_id, create_time, "
-                "message_content, source, packed_info_data, sort_seq "
+                "message_content, source, packed_info_data, server_id, sort_seq "
                 "FROM %s WHERE sort_seq > ? ORDER BY sort_seq ASC LIMIT ?" % table,
                 (since_seq, limit),
             ).fetchall()
+            try:
+                chat_senders = self._build_chat_sender_index(conn, table)
+            except Exception:
+                logging.warning("chat_sender_index(%s) failed, fallback to global", user, exc_info=True)
+                chat_senders = {}
+            dicts = [self._msg_row_to_dict(r, user, chat_senders) for r in rows]
+            self._resolve_quote_targets(conn, table, dicts)
         finally:
             conn.close()
-        return [self._msg_row_to_dict(r) for r in rows]
+        return dicts
 
-    def _msg_row_to_dict(self, r) -> dict:
+    def _msg_row_to_dict(self, r, user: Optional[str] = None,
+                         chat_senders: Optional[Dict[int, str]] = None) -> dict:
         content = r["message_content"]
         mtype = WeChatDB._msg_type_name(r["local_type"])
+        quote = None
+        if r["local_type"] == MSG_TYPE_QUOTE and isinstance(content, bytes):
+            quote = self._parse_quote_xml(content)
+            if quote:
+                # для ответа с цитированием содержимое сообщения — текст ответа
+                mtype = "回复"  # тип для отображения
+                content = quote["reply"] or content
         if isinstance(content, bytes):
             content = WeChatDB._friendly_content(content, mtype)
+            # blob-сообщения (зашифрованный контейнер) — подтянуть открытый текст из FTS
+            if content.startswith("[") and content.endswith("]") and user:
+                fts = self._fts_plaintext(user, r["local_id"], r["create_time"])
+                if fts:
+                    content = fts
         sender_id = r["real_sender_id"]
         sender_username = ""
         if sender_id and sender_id != 2:
-            sender_index = self._sender_id_index()
-            sender_username = sender_index.get(int(sender_id), "")
+            # предпочитаем початовую карту (числовой id локальный для чата),
+            # глобальный SenderName2Id — только как запасной вариант
+            if chat_senders:
+                sender_username = chat_senders.get(int(sender_id), "")
+            if not sender_username:
+                sender_username = self._sender_id_index().get(int(sender_id), "")
             if not sender_username:
                 # fallback: 尝试从 contact.db 获取昵称
                 sender_username = self.get_nickname(str(sender_id))
@@ -1210,6 +1281,13 @@ class WeChatDB:
             "create_time": r["create_time"],
             "content": content,
             "sort_seq": r["sort_seq"],
+            # данные цитаты (заполняются для ответов с цитированием)
+            "quote_svrid": quote["svrid"] if quote else None,
+            "quote_qtype": quote["qtype"] if quote else None,
+            "quote_sender": quote["chatusr"] if quote else None,
+            "quote_display": quote["display"] if quote else None,
+            "quote_content": WeChatDB._quote_display_text(quote["qcontent"], quote["qtype"]) if quote else None,
+            "quote_local_id": None,
         }
 
     @staticmethod
@@ -1235,6 +1313,149 @@ class WeChatDB:
                 cleaned = parts[0].strip()
             return cleaned if cleaned else "[%s]" % mtype
         return "[%s]" % mtype
+
+    def _parse_quote_xml(self, content: bytes) -> Optional[dict]:
+        """Разобрать zstd-сжатый XML quote-сообщения (тип MSG_TYPE_QUOTE).
+
+        Возвращает:
+          reply    — текст ответа (собственный текст пользователя),
+          svrid    — server_id цитируемого сообщения (str),
+          qtype    — тип цитируемого сообщения (str),
+          chatusr  — wxid автора цитируемого сообщения,
+          display  — displayname автора цитаты из XML,
+          qcontent — «сырое» содержимое цитаты (текст или вложенный XML).
+        None, если сообщение не является цитатой или не удалось распаковать.
+        """
+        if not _zstd or not isinstance(content, bytes) or content[:4] != b"\x28\xb5\x2f\xfd":
+            return None
+        try:
+            raw = _ZSTD_DCTX.decompress(content)
+            txt = raw.decode("utf-8", "replace")
+        except Exception:
+            return None
+        if "<refermsg>" not in txt:
+            return None
+
+        def _tag(src, name):
+            m = re.search(r"<%s>(.*?)</%s>" % (name, name), src, re.S)
+            return m.group(1).strip() if m else ""
+
+        title = re.search(r"<title>(.*?)</title>", txt, re.S)
+        ref = re.search(r"<refermsg>(.*?)</refermsg>", txt, re.S)
+        ref = ref.group(1) if ref else ""
+        return {
+            "reply": title.group(1).strip() if title else "",
+            "svrid": _tag(ref, "svrid"),
+            "qtype": _tag(ref, "type"),
+            "chatusr": _tag(ref, "chatusr"),
+            "display": _tag(ref, "displayname"),
+            "qcontent": _tag(ref, "content"),
+        }
+
+    @staticmethod
+    def _quote_display_text(qcontent: str, qtype: str) -> str:
+        """Человекочитаемый текст цитаты: для медиа-типов показываем заголовок/плейсхолдер."""
+        text = (qcontent or "").strip()
+        # в групповых медиа-цитатах спереди может быть префикс "wxid_xxx:\n"
+        if text.startswith("wxid_") and ":\n" in text[:40]:
+            text = text.split(":\n", 1)[1].strip()
+        try:
+            qtype = int(qtype)
+        except (TypeError, ValueError):
+            qtype = 0
+        if qtype == 1:
+            return text
+        if qtype == 49:
+            # файл/ссылка/карточка — вытаскиваем заголовок из вложенного XML
+            for tag in ("title", "des"):
+                m = re.search(r"<%s>(.*?)</%s>" % (tag, tag), text, re.S)
+                if m and m.group(1).strip():
+                    return m.group(1).strip()
+        name = WeChatDB._msg_type_name(qtype)
+        return "[%s]" % name if isinstance(name, str) else "[消息]"
+
+    def _resolve_quote_targets(self, conn, table: str, dicts: List[dict]) -> None:
+        """По server_id (svrid) цитат найти local_id исходного сообщения в этом чате."""
+        svrids = set()
+        for d in dicts:
+            sv = d.get("quote_svrid")
+            if sv:
+                try:
+                    svrids.add(int(sv))
+                except (TypeError, ValueError):
+                    pass
+        if not svrids:
+            return
+        placeholders = ",".join("?" * len(svrids))
+        mapping: Dict[int, int] = {}
+        try:
+            rows = conn.execute(
+                "SELECT local_id, server_id FROM %s WHERE server_id IN (%s)"
+                % (table, placeholders),
+                tuple(svrids),
+            ).fetchall()
+        except sqlite3.DatabaseError:
+            return
+        for lid, sid in rows:
+            if sid is not None:
+                mapping[int(sid)] = lid
+        for d in dicts:
+            sv = d.get("quote_svrid")
+            if sv:
+                try:
+                    d["quote_local_id"] = mapping.get(int(sv))
+                except (TypeError, ValueError):
+                    d["quote_local_id"] = None
+
+    def _fts_plaintext(self, user: str, local_id: int, create_time: int) -> Optional[str]:
+        """Открытый текст сообщения из FTS-индекса (message_fts.db).
+
+        Длинные/@-сообщения в message_*.db хранятся как зашифрованный blob
+        (магия 28 b5 2f fd), но в FTS-индексе лежит их открытый текст.
+        Content-таблица FTS5: id, c0=текст, c1=local_id, c2=create_time(мс), ...,
+        c6=create_time(с). Матчим по (c1, c2) — миллисекунды исключают коллизии
+        между чатами. Индекс кэшируется на весь процесс (карта ключей).
+        """
+        if self._fts_cache is None:
+            self._build_fts_cache()
+        if self._fts_cache is None:
+            return None
+        t = self._fts_cache.get((local_id, create_time * 1000))
+        if t is None:
+            t = self._fts_cache.get((local_id, create_time))
+        return t
+
+    def _build_fts_cache(self) -> None:
+        """Построить карту (c1, c2) -> текст из всех 4 партиций message_fts.db."""
+        cache: Dict[Tuple[int, int], str] = {}
+        try:
+            conn = self._open("message\\message_fts.db")
+        except Exception:
+            self._fts_cache = None
+            return
+        try:
+            for i in range(4):
+                tbl = "message_fts_v4_%d_content" % i
+                try:
+                    cur = conn.execute("SELECT c0, c1, c2, c6 FROM %s" % tbl)
+                except sqlite3.DatabaseError:
+                    continue
+                for row in cur.fetchall():
+                    c0, c1, c2, c6 = row
+                    if c1 is None or not c0:
+                        continue
+                    if isinstance(c0, bytes):
+                        c0 = c0.decode("utf-8", "replace")
+                    text = str(c0).strip()
+                    if not text:
+                        continue
+                    if c2 is not None:
+                        cache[(int(c1), int(c2))] = text
+                    if c6 is not None:
+                        cache[(int(c1), int(c6))] = text
+        finally:
+            conn.close()
+        self._fts_cache = cache
 
     def get_sessions(self, limit: int = 100) -> List[dict]:
         """会话列表（来自 session.db）"""
@@ -1351,6 +1572,28 @@ class WeChatDB:
             break
         return idx
 
+    def _nickname_to_wxid(self) -> Dict[str, str]:
+        """Обратный словарь: никнейм/заметка → wxid (для резолва префикса-имени)."""
+        if getattr(self, "_nick2wx", None) is not None:
+            return self._nick2wx
+        idx: Dict[str, str] = {}
+        for rel, path, _ in self._db_files:
+            if os.path.basename(path) != "contact.db":
+                continue
+            conn = self._open(rel)
+            try:
+                for u, n, r in conn.execute(
+                    "SELECT username, nick_name, remark FROM contact"
+                ):
+                    for name in (r, n):
+                        if name and name not in idx:
+                            idx[name] = u
+            finally:
+                conn.close()
+            break
+        self._nick2wx = idx
+        return idx
+
     def _sender_id_index(self) -> Dict[int, str]:
         """消息表 real_sender_id(数字) → 用户名，来自 message_resource.SenderName2Id"""
         if hasattr(self, '_sender_id_cache') and self._sender_id_cache is not None:
@@ -1371,6 +1614,72 @@ class WeChatDB:
             break
         self._sender_id_cache = idx
         return idx
+
+    def _chat_sender_index(self, user: str) -> Dict[int, str]:
+        """Початовый словарь real_sender_id → wxid отправителя.
+
+        Для групповых сообщений WeChat 4.x настоящий отправитель записан в
+        начале текста сообщения: "wxid_xxx:\n...". Числовой real_sender_id
+        локальный для чата и НЕ совпадает с глобальной таблицей SenderName2Id
+        (та же цифра в разных чатах может значить разных людей), поэтому
+        соответствие строится по текстовым сообщениям самого чата.
+
+        Возвращает {real_sender_id: wxid}. Кэшируется; пересобирается при
+        появлении новых сообщений (по MAX(sort_seq)).
+        """
+        try:
+            found = self._msg_conn(user)
+        except Exception:
+            logging.warning("chat_sender_index open db failed for %s", user, exc_info=True)
+            return {}
+        if not found:
+            return {}
+        conn, table = found
+        try:
+            return self._build_chat_sender_index(conn, table)
+        finally:
+            conn.close()
+
+    def _build_chat_sender_index(self, conn, table) -> Dict[int, str]:
+        """Построить початовую карту отправителей из УЖЕ открытой БД (не переоткрывает)."""
+        cache = getattr(self, "_chat_sender_cache", None)
+        if cache is None:
+            cache = {}
+            self._chat_sender_cache = cache
+        try:
+            max_seq = conn.execute("SELECT MAX(sort_seq) FROM %s" % table).fetchone()[0]
+        except sqlite3.DatabaseError:
+            max_seq = None
+        if cache.get(table) and cache[table][0] == max_seq:
+            return cache[table][1]
+        # префикс "wxid_xxx:" или "Никнейм:" встречается в текстовых сообщениях (тип 1).
+        # Никнейм-префиксы резолвим в wxid через contact.db.
+        nick2wx = self._nickname_to_wxid()
+        votes: Dict[int, Dict[str, int]] = {}
+        rows = conn.execute(
+            "SELECT real_sender_id, message_content FROM %s "
+            "WHERE (local_type & 255) = 1" % table
+        ).fetchall()
+        for r in rows:
+            rid = r["real_sender_id"]
+            if not rid or rid == 2:
+                continue
+            content = r["message_content"]
+            if isinstance(content, bytes):
+                content = WeChatDB._friendly_content(content, "文本")
+            m = re.match(r"^(wxid_[A-Za-z0-9_]+|[^:\n\x00]{1,40}):\s*\n?", content or "")
+            if not m:
+                continue
+            ident = m.group(1)
+            if not ident.startswith("wxid_"):
+                ident = nick2wx.get(ident, ident)
+            v = votes.setdefault(int(rid), {})
+            v[ident] = v.get(ident, 0) + 1
+        result: Dict[int, str] = {}
+        for rid, cnt in votes.items():
+            result[rid] = max(cnt, key=cnt.get)
+        cache[table] = (max_seq, result)
+        return result
 
     def _resolve_sender(self, sender_id, sender_index, nicks, self_nick) -> str:
         if sender_id in (2, "2"):
@@ -1518,11 +1827,15 @@ class WeChatDB:
                 rows.sort(key=lambda r: (r["sort_seq"], r["local_id"]))
                 if limit_per_chat:
                     rows = rows[-limit_per_chat:]
+                # початовый real_sender_id → wxid (числовой id локальный для чата)
+                chat_senders = self._chat_sender_index(user)
                 msgs = [
                     dict(
                         self._export_row(r, MSG_TYPE_NAMES),
                         sender_name=self._resolve_sender(
-                            r["real_sender_id"], sender_index, nicks,
+                            r["real_sender_id"],
+                            {**sender_index, **chat_senders},
+                            nicks,
                             self_info.get("nick_name", "我"),
                         ),
                     )

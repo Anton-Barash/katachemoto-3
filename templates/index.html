@@ -46,7 +46,16 @@ h1 { font-size: 1.5rem; color: #333; }
 .message .sender-id { font-size: 0.7rem; color: #b0b0b0; margin-left: 6px; font-weight: normal; }
 .message .content { background: #e3f2fd; padding: 0.75rem 1rem; border-radius: 12px; display: inline-block; text-align: left; }
 .message.self .content { background: #4caf50; color: white; }
+.message .content.image { background: none; padding: 0; }
+.message .content.image img { max-width: 220px; max-height: 260px; border-radius: 8px; display: block; cursor: pointer; }
 .message .time { font-size: 0.7rem; color: #999; margin-top: 0.25rem; }
+.message .quote-block { background: rgba(0,0,0,0.06); border-left: 3px solid rgba(0,0,0,0.25); border-radius: 6px; padding: 0.4rem 0.6rem; margin-bottom: 0.4rem; max-width: 320px; cursor: pointer; }
+.message.self .quote-block { background: rgba(0,0,0,0.12); border-left-color: rgba(255,255,255,0.6); }
+.message .quote-block:hover { background: rgba(0,0,0,0.1); }
+.message .quote-block .quote-sender { font-size: 0.7rem; font-weight: 600; color: #666; margin-bottom: 0.15rem; }
+.message.self .quote-block .quote-sender { color: #fff; }
+.message .quote-block .quote-text { font-size: 0.8rem; color: #666; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.message.self .quote-block .quote-text { color: #eaf7ea; }
 .input-area { border-top: 1px solid #eee; padding: 1rem; display: flex; gap: 0.5rem; }
 .input-area input { flex: 1; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 1rem; }
 button { padding: 0.75rem 1.5rem; background: #2196f3; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
@@ -236,6 +245,11 @@ function escapeHtml(text) {
 
 function chatIcon(type) {
     return {'group':'👥','official':'📢','system':'⚙️','user':'👤'}[type]||'👤';
+}
+
+function imgError(img) {
+    img.onerror = null;
+    img.src = "data:image/svg+xml;utf8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="100%" height="100%" fill="#ececec"/><text x="50%" y="50%" font-size="14" fill="#999" text-anchor="middle" dominant-baseline="middle">[图片]</text></svg>');
 }
 
 function renderSessions() {
@@ -495,13 +509,34 @@ async function loadMessages(username) {
     const res = await fetch(`/api/messages?username=${encodeURIComponent(username)}&limit=100`);
     const data = await res.json();
     const container = document.getElementById('messages');
-    container.innerHTML = (data.messages||[]).map((m, idx) => `
+    const msgs = data.messages || [];
+    // local_id -> индекс в отрендеренном списке (для перехода к цитируемому сообщению)
+    const localIdToIdx = {};
+    msgs.forEach((m, i) => { if (m.local_id != null) localIdToIdx[m.local_id] = i; });
+    container.innerHTML = msgs.map((m, idx) => {
+        let bodyHtml = '';
+        if (m.is_image && m.local_id != null) {
+            const url = `/api/image/${encodeURIComponent(username)}/${m.local_id}`;
+            bodyHtml = `<div class="content image"><img src="${url}" alt="[图片]" loading="lazy" onerror="imgError(this)" onclick="window.open('${url}','_blank')"></div>`;
+        } else {
+            if (m.quote) {
+            const targetIdx = (m.quote_local_id != null && localIdToIdx[m.quote_local_id] != null) ? localIdToIdx[m.quote_local_id] : null;
+            bodyHtml += `
+            <div class="quote-block" ${targetIdx != null ? `onclick="scrollToMessage(${targetIdx})"` : ''} title="Перейти к цитируемому сообщению">
+                <div class="quote-sender">${escapeHtml(m.quote_sender || '')}</div>
+                <div class="quote-text">${escapeHtml(m.quote).replace(/\n/g, '<br>')}</div>
+            </div>`;
+            }
+            bodyHtml += `<div class="content">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
+        }
+        return `
         <div class="message ${m.is_self ? 'self' : ''}" data-msg-id="${idx}">
             ${!m.is_self ? `<div class="sender">${escapeHtml(m.sender)}<span class="sender-id">${escapeHtml(m.id)}</span></div>` : ''}
-            <div class="content">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>
+            ${bodyHtml}
             <div class="time">${m.time}</div>
         </div>
-    `).join('');
+    `;
+    }).join('');
     requestAnimationFrame(() => {
         container.scrollTop = container.scrollHeight;
     });

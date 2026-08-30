@@ -21,6 +21,7 @@ import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(name)s] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s')
 
 from wechatauto import WeChatDB
+from wechatauto.media import MediaDownloader
 from wechatauto.guia import quick_send
 from wechatauto.history_db import (
     init_db, get_all_settings, get_pinned_list, get_aliases,
@@ -47,6 +48,24 @@ app = Flask(__name__)
 # don't instantiate WeChatDB at import time — do it lazily and handle errors
 _db_instance = None
 _db_init_attempted = False
+
+_media_downloader = None
+
+
+def _get_media_downloader(db):
+    """Thread-safe lazy MediaDownloader. Извлекает cfg_dword один раз и кэширует."""
+    global _media_downloader
+    if _media_downloader is None:
+        cfg_dword = getattr(db, "cfg_dword", None)
+        if cfg_dword is None:
+            try:
+                auto = db.extract_master_key()
+                if auto:
+                    cfg_dword = auto[1]
+            except Exception:
+                cfg_dword = None
+        _media_downloader = MediaDownloader(db, cfg_dword=cfg_dword)
+    return _media_downloader
 
 
 def _migrate_config_to_db():
@@ -534,26 +553,63 @@ def api_messages():
         return nick_index.get(u, u) if u else u
 
     formatted = []
+    is_group = "@chatroom" in username
     for m in msgs:
         content = m.get("content") or f"[{m.get('type')}]"
         sender = m.get("sender_username") or ""
 
         # В WeChat 4.x групповые сообщения хранят настоящего отправителя
-        # в начале текста: "wxid_xxx:\nсообщение". Берём его как отправителя
-        # и убираем префикс из текста.
-        mm = re.match(r"^(wxid_[A-Za-z0-9_]+):\s*\n?", content)
-        if mm:
-            sender = mm.group(1)
-            content = content[mm.end():]
+        # в начале текста: "wxid_xxx:\nсообщение" или "Никнейм:\nсообщение".
+        # Убираем префикс из текста (только для групп, чтобы не обрезать
+        # обычные сообщения, начинающиеся с "Имя:").
+        if is_group:
+            mm = re.match(r"^(wxid_[A-Za-z0-9_]+|[^:\n]{1,40}):\s*\n?", content)
+            if mm:
+                content = content[mm.end():]
+                if not sender:
+                    sender = mm.group(1)
 
         formatted.append({
             "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("create_time", 0))),
             "sender": _display(sender),
             "id": sender,
             "content": content,
-            "is_self": m.get("sender_id") == 2
+            "type": m.get("type", ""),
+            "local_id": m.get("local_id"),
+            "is_image": m.get("type") == "图片",
+            "is_self": m.get("sender_id") == 2,
+            # ответ с цитированием
+            "quote": m.get("quote_content"),
+            "quote_sender": m.get("quote_display") or _display(m.get("quote_sender")),
+            "quote_local_id": m.get("quote_local_id"),
         })
     return jsonify({"messages": formatted})
+
+
+@app.route('/api/image/<username>/<int:local_id>')
+def api_image(username, local_id):
+    """Serve a decrypt image for a message in a chat."""
+    db = get_db()
+    if not db:
+        return "", 404
+    try:
+        dl = _get_media_downloader(db)
+        path = dl.download_image(username, local_id, save_dir=str(BASE / "media_cache"))
+        if not path or not os.path.isfile(path):
+            return "", 404
+        ext = os.path.splitext(path)[1].lower()
+        mimetype = {
+            ".jpg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".wxgf": "image/heic",
+        }.get(ext, "application/octet-stream")
+        with open(path, "rb") as f:
+            data = f.read()
+        return app.response_class(data, mimetype=mimetype)
+    except Exception as e:
+        logging.warning("image %s/%s failed: %s", username, local_id, e)
+        return "", 404
 
 
 @app.route('/api/avatar/<username>')
