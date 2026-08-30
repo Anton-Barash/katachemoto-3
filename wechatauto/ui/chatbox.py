@@ -108,7 +108,11 @@ class ChatBox(BaseUISubWnd):
         self.tools = self.control.ToolBarControl()
         self._empty = False
         if (cid := self.id) and cid not in USED_MSG_IDS:
-            USED_MSG_IDS[self.id] = tuple((i.runtimeid for i in self.msgbox.GetChildren()))
+            controls = [
+                ctrl for ctrl in self.msgbox.GetChildren()
+                if uia.IsElementInWindow(self.msgbox, ctrl) and ctrl.ControlTypeName == 'ListItemControl'
+            ]
+            USED_MSG_IDS[self.id] = tuple(ctrl.runtimeid for ctrl in controls)
             if not USED_MSG_IDS[cid]:
                 self._empty = True
 
@@ -195,6 +199,11 @@ class ChatBox(BaseUISubWnd):
         if not self.msgbox.Exists(0):
             return []
         msg_controls = self.msgbox.GetChildren()
+        # ✅ КРИТИЧНО: отфильтровать только сообщения, принадлежащие ТЕКУЩЕМУ msgbox
+        msg_controls = [
+            ctrl for ctrl in msg_controls
+            if uia.IsElementInWindow(self.msgbox, ctrl) and ctrl.ControlTypeName == 'ListItemControl'
+        ]
         now_msg_ids = tuple((i.runtimeid for i in msg_controls))
         current_msg_count = len(now_msg_ids)
 
@@ -253,7 +262,6 @@ class ChatBox(BaseUISubWnd):
                     parse_msg(msg_control, self)
                     for msg_control
                     in new_controls
-                    if msg_control.ControlTypeName == 'ListItemControl'
                 ]
 
         # 如果消息数量没有增加，但可能有ID变化（处理消息刷新的情况）
@@ -272,7 +280,6 @@ class ChatBox(BaseUISubWnd):
                 parse_msg(msg_control, self)
                 for msg_control
                 in new_controls
-                if msg_control.ControlTypeName == 'ListItemControl'
             ]
 
         return []
@@ -284,7 +291,7 @@ class ChatBox(BaseUISubWnd):
             return
         msg_controls = [
             ctrl for ctrl in self.msgbox.GetChildren()
-            if ctrl.ControlTypeName == 'ListItemControl'
+            if uia.IsElementInWindow(self.msgbox, ctrl) and ctrl.ControlTypeName == 'ListItemControl'
         ]
         if not msg_controls:
             USED_MSG_IDS[self.id] = tuple()
@@ -299,7 +306,7 @@ class ChatBox(BaseUISubWnd):
         return [
             ctrl
             for ctrl in self.msgbox.GetChildren()
-            if ctrl.ControlTypeName == 'ListItemControl'
+            if uia.IsElementInWindow(self.msgbox, ctrl) and ctrl.ControlTypeName == 'ListItemControl'
         ]
 
     def _normalize_msg_id(self, msg_id: Union[Sequence[int], str, None]) -> Optional[str]:
