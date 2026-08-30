@@ -43,6 +43,144 @@ from wechatauto.analyser import (
 BASE = Path(__file__).resolve().parent
 CFG_PATH = BASE / "config.json"
 
+# ------------------------------------------------------------------
+# Форматирование текста сообщений (XML → человекочитаемый вид)
+# ------------------------------------------------------------------
+
+def _xml_text(s, tag):
+    """Безопасное извлечение текста из тега (без полного парсинга XML, так как
+    сообщения часто содержат битые/усечённые XML)."""
+    if tag not in s:
+        return ""
+    open_ = "<" + tag
+    close_ = "</" + tag + ">"
+    try:
+        start = s.index(open_)
+        # пропускаем атрибуты тега: ищем '>' после open_
+        gt = s.index(">", start + len(open_))
+        inner_start = gt + 1
+        end = s.index(close_, inner_start)
+        v = s[inner_start:end]
+    except (ValueError, IndexError):
+        return ""
+    # вычищаем CDATA
+    if v.startswith("<![CDATA[") and v.endswith("]]>"):
+        v = v[9:-3]
+    return v.strip()
+
+
+def prettify_message_content(content: str, mtype: str = "") -> str:
+    """Заменить XML/контейнеры на понятный текст. Возвращает строку
+    с читабельным содержанием или исходный текст, если преобразование
+    не требуется / не удалось."""
+    if not isinstance(content, str):
+        return content
+    stripped = content.strip()
+    if not stripped:
+        return content
+
+    # --- 1. Отмена сообщения (sysmsg revokemsg) ------------------------------
+    if stripped.startswith("<?xml") and "revokemsg" in stripped:
+        who = _xml_text(stripped, "content") or _xml_text(stripped, "oldmsgid") or ""
+        if who:
+            # очищаем кавычки WeChat-клиента (уже почти читаемо)
+            return "🚫 " + who.strip()
+        return "🚫 Сообщение отменено отправителем."
+
+    # --- 2. Системные сообщения sysmsg (добавление в группу / приглашения) ---
+    if stripped.startswith("<?xml") and "<sysmsg" in stripped:
+        t = _xml_text(stripped, "content") or _xml_text(stripped, "text")
+        if t:
+            return "ℹ️ " + t
+        # приглашения в группу
+        for tag in ("memberlist", "newxml", "username"):
+            if tag in stripped:
+                who = _xml_text(stripped, "content") or ""
+                if who:
+                    return "ℹ️ " + who
+                break
+
+    # --- 3. Emoji (WeChat стикеры) <msg><emoji ...> ------------------------
+    if stripped.startswith("<msg>") and "<emoji " in stripped:
+        md5 = re.search(r'md5\s*=\s*"([A-Fa-f0-9]{32})"', stripped)
+        fromu = re.search(r'fromusername\s*=\s*"([^"]+)"', stripped)
+        label = "[Стикер emoji]"
+        if md5:
+            label = "[Стикер %s]" % md5.group(1)[:8]
+        return label
+
+    # --- 4. Изображение <msg><img aeskey=...> ------------------------------
+    if "<img " in stripped and ("aeskey" in stripped or "cdnurl" in stripped or "cdnmidimgurl" in stripped):
+        label = "[🖼️ Изображение]"
+        return label
+
+    # --- 5. Видео <videomsg ...> ------------------------------------------
+    if "<videomsg " in stripped or "<video " in stripped:
+        title = _xml_text(stripped, "title") or _xml_text(stripped, "des")
+        return "[🎥 Видео%s]" % (f" — {title}" if title else "")
+
+    # --- 6. Карточка / ссылка / мини-приложение <appmsg> -------------------
+    if "<appmsg" in stripped:
+        mtype_val = _xml_text(stripped, "type")
+        title = _xml_text(stripped, "title") or _xml_text(stripped, "sourcedisplayname")
+        des = _xml_text(stripped, "des")
+        url = _xml_text(stripped, "url")
+        label_map = {
+            "3": "🎵 Музыка",
+            "4": "📹 Видео",
+            "5": "🔗 Ссылка",
+            "6": "📁 Файл",
+            "7": "🔗 Ссылка",
+            "8": "🔗 Картинка-ссылка",
+            "9": "💬 История",
+            "15": "🎁 Карточка",
+            "17": "📍 Геолокация",
+            "19": "💳 Транзакция",
+            "20": "💳 Карточка",
+            "24": "🎁 Референс",
+            "29": "🧩 Мини-приложение",
+            "30": "🔗 Запись",
+            "31": "🎽 Товар",
+            "33": "🎙️ Голосовое",
+            "34": "📝 Опрос",
+            "36": "📁 Документ",
+            "38": "💬 Сообщение-референс",
+            "51": "💼 Контакт",
+            "57": "📋 Карточка-статья",
+            "62": "👋 Пэт-пат",
+            "63": "📝 Квитанция",
+            "66": "🎁 Красный пакет",
+            "2000": "📝 Перевод средств",
+            "2001": "💸 Получен перевод",
+            "2002": "💳 Перевод",
+            "2003": "💳 Счёт",
+        }
+        if mtype_val in label_map:
+            prefix = label_map[mtype_val]
+        else:
+            prefix = ("📋 Карточка (тип %s)" % mtype_val) if mtype_val else "📋 Карточка"
+        parts = []
+        if title:
+            parts.append(title[:80])
+        if des and des != title:
+            parts.append(des[:100])
+        if parts:
+            suffix = (f" — {url[:60]}" if url else "")
+            return f"[{prefix}] " + " · ".join(parts) + suffix
+        if url:
+            return f"[{prefix}] {url[:100]}"
+        return f"[{prefix}]"
+
+    # --- 7. Пересылка нескольких сообщений (шаблон записи группы) ----------
+    if stripped.startswith("<?xml") and "<msg " in stripped:
+        # Универсальное: показываем title если есть
+        title = _xml_text(stripped, "title")
+        if title:
+            return "[ℹ️ Системное] " + title
+
+    return content
+
+
 app = Flask(__name__)
 
 # don't instantiate WeChatDB at import time — do it lazily and handle errors
@@ -557,6 +695,7 @@ def api_messages():
     for m in msgs:
         content = m.get("content") or f"[{m.get('type')}]"
         sender = m.get("sender_username") or ""
+        mtype = m.get("type") or ""
 
         # В WeChat 4.x групповые сообщения хранят настоящего отправителя
         # в начале текста: "wxid_xxx:\nсообщение" или "Никнейм:\nсообщение".
@@ -569,15 +708,20 @@ def api_messages():
                 if not sender:
                     sender = mm.group(1)
 
+        # Форматируем XML/спец-сообщения в читаемый вид
+        content = prettify_message_content(content, mtype)
+        is_sys = bool(content and content[0] in ("🚫", "ℹ️") and isinstance(content, str))
+
         formatted.append({
             "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("create_time", 0))),
             "sender": _display(sender),
             "id": sender,
             "content": content,
-            "type": m.get("type", ""),
+            "type": mtype,
             "local_id": m.get("local_id"),
-            "is_image": m.get("type") == "图片",
+            "is_image": mtype == "图片",
             "is_self": m.get("sender_id") == 2,
+            "is_sys": is_sys,
             # ответ с цитированием
             "quote": m.get("quote_content"),
             "quote_sender": m.get("quote_display") or _display(m.get("quote_sender")),
