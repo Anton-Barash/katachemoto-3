@@ -17,7 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 from sqlalchemy import (
     Column, String, Boolean, Integer, BigInteger, Text,
-    DateTime, UniqueConstraint, Index, create_engine, inspect
+    DateTime, UniqueConstraint, Index, create_engine, inspect, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
@@ -125,6 +125,7 @@ class Message(Base):
     sender_username = Column(String(255), nullable=True)
     sender_name = Column(String(500), nullable=True)
     content = Column(Text, nullable=True)
+    media_path = Column(Text, nullable=True)
     msg_type = Column(String(50), nullable=True)
     create_time = Column(BigInteger, nullable=True)
     is_self = Column(Boolean, default=False)
@@ -155,6 +156,7 @@ def init_db():
     engine = get_engine()
     Base.metadata.create_all(engine)
     _migrate_chat_settings_columns(engine)
+    _migrate_messages_columns(engine)
     logging.info("PostgreSQL tables created/verified")
 
 
@@ -176,7 +178,7 @@ def _migrate_chat_settings_columns(engine):
             if col_name not in existing_columns:
                 try:
                     conn.execute(
-                        f'ALTER TABLE chat_settings ADD COLUMN "{col_name}" {col_def}'
+                        text(f'ALTER TABLE chat_settings ADD COLUMN "{col_name}" {col_def}')
                     )
                     added += 1
                 except Exception as e:
@@ -184,6 +186,28 @@ def _migrate_chat_settings_columns(engine):
         if added:
             conn.commit()
             logging.info("Migrated %d new columns to chat_settings", added)
+
+
+def _migrate_messages_columns(engine):
+    """Добавить недостающие колонки в messages (миграция без потери данных)."""
+    inspector = inspect(engine)
+    existing_columns = {c["name"] for c in inspector.get_columns("messages")}
+
+    new_columns = {
+        "media_path": "TEXT",
+    }
+
+    with engine.connect() as conn:
+        for col_name, col_def in new_columns.items():
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(
+                        text(f'ALTER TABLE messages ADD COLUMN "{col_name}" {col_def}')
+                    )
+                    logging.info("Migrated column %s to messages", col_name)
+                except Exception as e:
+                    logging.warning("Migration failed for column %s: %s", col_name, e)
+        conn.commit()
 
 
 def get_all_settings() -> Dict[str, dict]:
@@ -317,6 +341,7 @@ def get_aliases() -> Dict[str, str]:
 
 def save_message(username: str, local_id: int, sender: str = "",
                  sender_name: str = "", content: str = "",
+                 media_path: str = "",
                  msg_type: str = "", create_time: int = 0,
                  is_self: bool = False) -> None:
     """Сохранить одно сообщение в историю."""
@@ -333,6 +358,7 @@ def save_message(username: str, local_id: int, sender: str = "",
             sender_username=sender,
             sender_name=sender_name,
             content=content,
+            media_path=media_path,
             msg_type=msg_type,
             create_time=create_time,
             is_self=is_self,
@@ -366,11 +392,21 @@ def get_messages(username: str, limit: int = 100, offset: int = 0) -> List[dict]
                 "sender_username": r.sender_username,
                 "sender_name": r.sender_name,
                 "content": r.content,
+                "media_path": r.media_path,
                 "msg_type": r.msg_type,
                 "create_time": r.create_time,
                 "is_self": r.is_self,
             })
         return result
+    finally:
+        session.close()
+
+
+def get_pg_message_count(username: str) -> int:
+    """Сколько сообщений в PostgreSQL для данного чата."""
+    session = get_session()
+    try:
+        return session.query(Message).filter_by(username=username).count()
     finally:
         session.close()
 

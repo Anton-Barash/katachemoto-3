@@ -88,7 +88,10 @@ def _sync_chat(db, username: str) -> dict:
             break
 
     saved = 0
+    failed = 0
+    max_saved_time = last_sync
     for m in reversed(new_msgs):  # Сохраняем от старых к новым
+        ct = m.get("create_time", 0) or 0
         try:
             save_message(
                 username=username,
@@ -96,18 +99,30 @@ def _sync_chat(db, username: str) -> dict:
                 sender=m.get("sender_username", "") or "",
                 sender_name="",
                 content=m.get("content", "") or "",
+                media_path="",
                 msg_type=m.get("type", "") or "",
-                create_time=m.get("create_time", 0) or 0,
+                create_time=ct,
                 is_self=m.get("sender_id") == 2,
             )
             saved += 1
+            if ct > max_saved_time:
+                max_saved_time = ct
         except Exception:
             # Если сообщение уже существует (duplicate local_id) — пропускаем
-            continue
+            failed += 1
+            logging.warning("sync_service: failed to save msg local_id=%s in %s",
+                            m.get("local_id"), username, exc_info=True)
 
-    # Обновить время последней синхронизации
-    if max_create_time > last_sync:
-        set_last_sync_time(username, max_create_time)
+    # Обновить время последней синхронизации ТОЛЬКО по реально сохранённым
+    # сообщениям. Если были ошибки — не двигаем last_sync, чтобы при следующем
+    # запуске пропущенные сообщения были захвачены снова.
+    if failed == 0 and max_saved_time > last_sync:
+        set_last_sync_time(username, max_saved_time)
+    elif failed:
+        logging.warning(
+            "sync_service: %s — %d messages failed to save, last_sync not advanced",
+            username, failed,
+        )
 
     # Если были новые сообщения — установить флаг для анализа
     if saved > 0:

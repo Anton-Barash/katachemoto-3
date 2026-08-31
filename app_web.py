@@ -31,6 +31,8 @@ from wechatauto.history_db import (
     get_effective_prompt,
     get_unprocessed_messages, mark_messages_processed,
     get_message_stats,
+    get_messages as pg_get_messages,
+    get_pg_message_count,
     set_ai_analysis, get_ai_analysis, get_ai_analysis_history,
     unpin_and_cleanup,
 )
@@ -663,25 +665,86 @@ def send_message():
         return jsonify({"success": False, "error": str(e)})
 
 
+def _format_pg_messages(username: str, limit: int, offset: int = 0, total: int = 0) -> dict:
+    """Загрузить и отформатировать сообщения из PostgreSQL (страница limit|offset)."""
+    pg_msgs = pg_get_messages(username, limit=limit, offset=offset)
+    pg_msgs.reverse()  # от старых к новым
+    logging.debug("API messages for %s: %d from PG (offset=%d)", username, len(pg_msgs), offset)
+
+    # Для отображения имён нужен nick_index из WeChatDB
+    db = get_db()
+    try:
+        nick_index = db.get_nickname_index() if db else {}
+    except Exception:
+        nick_index = {}
+
+    def _display(u):
+        return nick_index.get(u, u) if u else u
+
+    is_group = "@chatroom" in username
+    formatted = []
+    for m in pg_msgs:
+        content = m.get("content") or f"[{m.get('msg_type')}]"
+        sender = m.get("sender_username") or ""
+        mtype = m.get("msg_type") or ""
+
+        if is_group:
+            mm = re.match(r"^(wxid_[A-Za-z0-9_]+|[^:\n]{1,40}):\s*\n?", content)
+            if mm:
+                content = content[mm.end():]
+                if not sender:
+                    sender = mm.group(1)
+
+        content = prettify_message_content(content, mtype)
+        is_sys = bool(content and content[0] in ("🚫", "ℹ️") and isinstance(content, str))
+
+        formatted.append({
+            "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("create_time", 0))),
+            "sender": _display(sender),
+            "id": sender,
+            "content": content,
+            "type": mtype,
+            "local_id": m.get("local_id"),
+            "is_image": mtype == "图片",
+            "is_self": m.get("is_self", False),
+            "is_sys": is_sys,
+            "media_path": m.get("media_path") or "",
+        })
+    return {"messages": formatted, "source": "pg", "total": total, "offset": offset}
+
+
 @app.route('/api/messages')
 def api_messages():
+    username = request.args.get("username", "")
+    try:
+        limit = int(request.args.get("limit", 10))
+    except Exception:
+        limit = 10
+    try:
+        offset = int(request.args.get("offset", 0))
+    except Exception:
+        offset = 0
+
+    # 1. Пробуем PostgreSQL (быстро) — если есть достаточно сообщений
+    try:
+        pg_count = get_pg_message_count(username)
+        if pg_count >= limit + offset:
+            return jsonify(_format_pg_messages(username, limit, offset, pg_count))
+    except Exception as e:
+        logging.warning("PG messages failed for %s, fallback to WeChatDB: %s", username, e)
+
+    # 2. PG не хватает — грузим из WeChatDB
     db = get_db()
     if not db:
         return jsonify({"messages": [], "error": "WeChat DB not available"})
-    username = request.args.get("username", "")
-    try:
-        limit = int(request.args.get("limit", 100))
-    except Exception:
-        limit = 100
     try:
         msgs = list(db.get_messages(username, limit=limit))
     except Exception:
         logging.warning("Failed to read messages for %s", username)
         return jsonify({"messages": []})
     msgs.reverse()
-    logging.debug("API messages for %s: %d messages", username, len(msgs))
+    logging.debug("API messages for %s: %d from WeChatDB", username, len(msgs))
 
-    # Те же никнеймы, что и в списке чатов (username -> display_name из contact.db)
     try:
         nick_index = db.get_nickname_index()
     except Exception:
@@ -697,10 +760,6 @@ def api_messages():
         sender = m.get("sender_username") or ""
         mtype = m.get("type") or ""
 
-        # В WeChat 4.x групповые сообщения хранят настоящего отправителя
-        # в начале текста: "wxid_xxx:\nсообщение" или "Никнейм:\nсообщение".
-        # Убираем префикс из текста (только для групп, чтобы не обрезать
-        # обычные сообщения, начинающиеся с "Имя:").
         if is_group:
             mm = re.match(r"^(wxid_[A-Za-z0-9_]+|[^:\n]{1,40}):\s*\n?", content)
             if mm:
@@ -708,7 +767,6 @@ def api_messages():
                 if not sender:
                     sender = mm.group(1)
 
-        # Форматируем XML/спец-сообщения в читаемый вид
         content = prettify_message_content(content, mtype)
         is_sys = bool(content and content[0] in ("🚫", "ℹ️") and isinstance(content, str))
 
@@ -722,12 +780,11 @@ def api_messages():
             "is_image": mtype == "图片",
             "is_self": m.get("sender_id") == 2,
             "is_sys": is_sys,
-            # ответ с цитированием
             "quote": m.get("quote_content"),
             "quote_sender": m.get("quote_display") or _display(m.get("quote_sender")),
             "quote_local_id": m.get("quote_local_id"),
         })
-    return jsonify({"messages": formatted})
+    return jsonify({"messages": formatted, "source": "wechat", "total": None, "offset": 0})
 
 
 @app.route('/api/image/<username>/<int:local_id>')

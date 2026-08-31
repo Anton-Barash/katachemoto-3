@@ -59,6 +59,9 @@ h1 { font-size: 1.5rem; color: #333; }
 .message.self .quote-block + .content { clear: right; }
 .message.self::after { content: ''; display: block; clear: both; }
 .message .quote-block:hover { filter: brightness(0.97); }
+.load-more-wrap { text-align: center; padding: 0.5rem 0; }
+.load-more-btn { background: #eceff1; color: #455a64; border: 1px solid #cfd8dc; border-radius: 14px; padding: 0.3rem 1rem; font-size: 0.8rem; cursor: pointer; }
+.load-more-btn:hover { background: #cfd8dc; }
 .message .quote-block .quote-sender { font-size: 0.72rem; font-weight: 700; color: #212121; margin-bottom: 0.2rem; }
 .message.self .quote-block .quote-sender { color: #1b5e20; }
 .message .quote-block .quote-text { font-size: 0.8rem; color: #263238; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; line-height: 1.35; }
@@ -512,41 +515,88 @@ async function refresh() {
     }
 }
 
-async function loadMessages(username) {
-    const res = await fetch(`/api/messages?username=${encodeURIComponent(username)}&limit=100`);
-    const data = await res.json();
-    const container = document.getElementById('messages');
-    const msgs = data.messages || [];
-    // local_id -> индекс в отрендеренном списке (для перехода к цитируемому сообщению)
-    const localIdToIdx = {};
-    msgs.forEach((m, i) => { if (m.local_id != null) localIdToIdx[m.local_id] = i; });
-    container.innerHTML = msgs.map((m, idx) => {
-        let bodyHtml = '';
-        if (m.is_image && m.local_id != null) {
-            const url = `/api/image/${encodeURIComponent(username)}/${m.local_id}`;
-            bodyHtml = `<div class="content image"><img src="${url}" alt="[图片]" loading="lazy" onerror="imgError(this)" onclick="window.open('${url}','_blank')"></div>`;
-        } else {
-            if (m.quote) {
-            const targetIdx = (m.quote_local_id != null && localIdToIdx[m.quote_local_id] != null) ? localIdToIdx[m.quote_local_id] : null;
+const PAGE_SIZE = 10;
+let loadedMsgs = [];       // накопленные сообщения текущего чата (от старых к новым)
+let msgTotal = null;       // всего сообщений в PG (null — неизвестно)
+let msgSource = 'pg';
+
+function messageHtml(m, idx, username) {
+    let bodyHtml = '';
+    if (m.is_image && m.local_id != null) {
+        const url = `/api/image/${encodeURIComponent(username)}/${m.local_id}`;
+        bodyHtml = `<div class="content image"><img src="${url}" alt="[图片]" loading="lazy" onerror="imgError(this)" onclick="window.open('${url}','_blank')"></div>`;
+    } else {
+        if (m.quote) {
+            // цитируемое сообщение ищем в накопленном списке
+            const targetIdx = (m.quote_local_id != null)
+                ? loadedMsgs.findIndex(x => x.local_id === m.quote_local_id) : -1;
             bodyHtml += `
-            <div class="quote-block" ${targetIdx != null ? `onclick="scrollToMessage(${targetIdx})"` : ''} title="Перейти к цитируемому сообщению">
+            <div class="quote-block" ${targetIdx >= 0 ? `onclick="scrollToMessage(${targetIdx})"` : ''} title="Перейти к цитируемому сообщению">
                 <div class="quote-sender">${escapeHtml(m.quote_sender || '')}</div>
                 <div class="quote-text">${escapeHtml(m.quote).replace(/\n/g, '<br>')}</div>
             </div>`;
-            }
-            bodyHtml += `<div class="content">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
         }
-        return `
-        <div class="message ${m.is_self ? 'self' : ''} ${m.is_sys ? 'sys' : ''}" data-msg-id="${idx}">
-            ${!m.is_self ? `<div class="sender">${escapeHtml(m.sender)}<span class="sender-id">${escapeHtml(m.id)}</span></div>` : ''}
-            ${bodyHtml}
-            <div class="time">${m.time}</div>
-        </div>
-    `;
-    }).join('');
-    requestAnimationFrame(() => {
-        container.scrollTop = container.scrollHeight;
-    });
+        bodyHtml += `<div class="content">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
+    }
+    return `
+    <div class="message ${m.is_self ? 'self' : ''} ${m.is_sys ? 'sys' : ''}" data-msg-id="${idx}">
+        ${!m.is_self ? `<div class="sender">${escapeHtml(m.sender)}<span class="sender-id">${escapeHtml(m.id)}</span></div>` : ''}
+        ${bodyHtml}
+        <div class="time">${m.time}</div>
+    </div>
+`;
+}
+
+function renderMessages(username) {
+    const container = document.getElementById('messages');
+    const localIdToIdx = {};
+    loadedMsgs.forEach((m, i) => { if (m.local_id != null) localIdToIdx[m.local_id] = i; });
+    let html = '';
+    // Кнопка "показать ещё" — сверху, если есть более старые сообщения
+    const hasMore = msgSource === 'pg' && msgTotal != null && loadedMsgs.length < msgTotal;
+    if (hasMore) {
+        html += `<div class="load-more-wrap"><button class="load-more-btn" onclick="loadOlderMessages()">показать ещё ${PAGE_SIZE}</button></div>`;
+    }
+    html += loadedMsgs.map((m, idx) => messageHtml(m, idx, username)).join('');
+    container.innerHTML = html;
+}
+
+async function loadMessages(username, { scrollBottom = true } = {}) {
+    const res = await fetch(`/api/messages?username=${encodeURIComponent(username)}&limit=${PAGE_SIZE}&offset=0`);
+    const data = await res.json();
+    loadedMsgs = data.messages || [];
+    msgTotal = data.total;
+    msgSource = data.source || 'pg';
+    renderMessages(username);
+    if (scrollBottom) {
+        requestAnimationFrame(() => {
+            const container = document.getElementById('messages');
+            container.scrollTop = container.scrollHeight;
+        });
+    }
+}
+
+async function loadOlderMessages() {
+    if (!currentChat) return;
+    const container = document.getElementById('messages');
+    const prevHeight = container.scrollHeight;
+    const username = currentChat.username;
+    const res = await fetch(`/api/messages?username=${encodeURIComponent(username)}&limit=${PAGE_SIZE}&offset=${loadedMsgs.length}`);
+    const data = await res.json();
+    const older = data.messages || [];
+    if (older.length) {
+        loadedMsgs = older.concat(loadedMsgs);
+        renderMessages(username);
+        // сохранить позицию просмотра: показать прежние верхние сообщения
+        requestAnimationFrame(() => {
+            container.scrollTop = container.scrollHeight - prevHeight;
+        });
+    }
+    // если больше нечего грузить — кнопка исчезнет при следующем renderMessages
+    if (msgTotal != null && loadedMsgs.length >= msgTotal) {
+        const btn = container.querySelector('.load-more-wrap');
+        if (btn) btn.remove();
+    }
 }
 
 async function sendMessage() {
