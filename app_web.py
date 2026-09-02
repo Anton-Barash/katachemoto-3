@@ -33,6 +33,7 @@ from wechatauto.history_db import (
     get_message_stats,
     get_messages as pg_get_messages,
     get_pg_message_count,
+    save_message,
     set_ai_analysis, get_ai_analysis, get_ai_analysis_history,
     unpin_and_cleanup,
 )
@@ -41,6 +42,7 @@ from wechatauto.analyser import (
     run_analys, run_meta_analys, get_analys_status,
     get_chat_analys, get_meta_analyses_history,
 )
+from wechatauto.analyser.db_ops import get_recent_analyses
 
 BASE = Path(__file__).resolve().parent
 CFG_PATH = BASE / "config.json"
@@ -80,6 +82,21 @@ def prettify_message_content(content: str, mtype: str = "") -> str:
     stripped = content.strip()
     if not stripped:
         return content
+
+    # --- 0. Голосовые/видеозвонки (voipmsg) — служебные, без смысловой
+    # нагрузки для анализа переписки. Заменяем на компактную метку. --------
+    if "<voipmsg" in stripped.lower():
+        status = re.search(r"<msg>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</msg>", stripped, re.S)
+        dur = re.search(r'duration\s*=\s*"(\d+)"', stripped) or re.search(
+            r"<duration>(\d+)</duration>", stripped
+        )
+        suffix = ""
+        if dur:
+            secs = int(dur.group(1))
+            suffix = " (%d:%02d)" % (secs // 60, secs % 60) if secs else ""
+        if status and status.group(1).strip():
+            return "[📞 Звонок%s] %s" % (suffix, status.group(1).strip())
+        return "[📞 Звонок%s]" % suffix
 
     # --- 1. Отмена сообщения (sysmsg revokemsg) ------------------------------
     if stripped.startswith("<?xml") and "revokemsg" in stripped:
@@ -173,7 +190,27 @@ def prettify_message_content(content: str, mtype: str = "") -> str:
             return f"[{prefix}] {url[:100]}"
         return f"[{prefix}]"
 
-    # --- 7. Пересылка нескольких сообщений (шаблон записи группы) ----------
+    # --- 7. Карточка нового контакта / запрос в друзья (WeChat 4.x) -------
+    # <msg bigheadimgurl=... username="v3_...@stranger" nickname="Elsa" .../>
+    if stripped.startswith("<?xml") and "<msg " in stripped and "nickname=" in stripped:
+        nick = re.search(r'\bnickname\s*=\s*"([^"]*)"', stripped)
+        province = re.search(r'\bprovince\s*=\s*"([^"]*)"', stripped)
+        city = re.search(r'\bcity\s*=\s*"([^"]*)"', stripped)
+        who = nick.group(1) if nick and nick.group(1) else ""
+        loc = "/".join(
+            p for p in (
+                (province.group(1) if province else ""),
+                (city.group(1) if city else ""),
+            ) if p
+        )
+        label = "👤 Новый контакт"
+        if who:
+            label += f" — {who}"
+        if loc:
+            label += f" ({loc})"
+        return f"[{label}]"
+
+    # --- 8. Пересылка нескольких сообщений (шаблон записи группы) ----------
     if stripped.startswith("<?xml") and "<msg " in stripped:
         # Универсальное: показываем title если есть
         title = _xml_text(stripped, "title")
@@ -370,6 +407,7 @@ def get_enriched_sessions():
                 "is_pinned": username in pg_pinned,
                 "has_new_messages": bool(setting.get("has_new_messages")) if setting else False,
                 "has_analys": bool(setting.get("analys")) if setting else False,
+                "tags": setting.get("tags", "") if setting else "",
             })
         except Exception:
             continue
@@ -485,6 +523,23 @@ def api_update_chat_prompt():
         return jsonify({"success": False, "error": str(e)})
 
 
+@app.route('/api/update_chat_tags', methods=['POST'])
+def update_chat_tags():
+    data = request.get_json()
+    username = data.get("username", "")
+    tags = data.get("tags", "").strip()
+
+    if not username:
+        return jsonify({"success": False, "error": "Нет username"})
+
+    try:
+        upsert_setting(username, tags=tags)
+        return jsonify({"success": True})
+    except Exception as e:
+        logging.warning("update_chat_tags failed: %s", e)
+        return jsonify({"success": False, "error": str(e)})
+
+
 @app.route('/api/sync_messages', methods=['POST'])
 def api_sync_messages():
     """Запустить синхронизацию сообщений для всех закреплённых чатов."""
@@ -563,11 +618,12 @@ def api_run_analys():
     """Запустить анализ одного чата."""
     data = request.get_json()
     username = data.get("username", "")
+    force = data.get("force", False)
     if not username:
         return jsonify({"success": False, "error": "Нет username"})
 
     try:
-        result = run_analys(username)
+        result = run_analys(username, force=force)
         return jsonify(result)
     except Exception as e:
         logging.warning("run_analys failed: %s", e)
@@ -601,15 +657,35 @@ def api_analys_status():
 
 @app.route('/api/chat_analys')
 def api_chat_analys():
-    """Получить анализ чата."""
+    """Получить последний анализ чата."""
     username = request.args.get("username", "")
     if not username:
         return jsonify({"error": "Нет username"})
     try:
-        analys = get_chat_analys(username)
-        return jsonify({"analys": analys or ""})
+        data = get_chat_analys(username)
+        analys_data = data or {"analys": "", "updated_at": None}
+        return jsonify({
+            "analys": analys_data["analys"],
+            "status": get_analys_status(username),
+            "last_updated": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()) if analys_data["updated_at"] else ""
+        })
     except Exception as e:
         logging.warning("chat_analys failed: %s", e)
+        return jsonify({"error": str(e), "analys": ""})
+
+
+@app.route('/api/recent_analyses')
+def api_recent_analyses():
+    """Получить последние анализы чата с промптами."""
+    username = request.args.get("username", "")
+    limit = int(request.args.get("limit", 3))
+    if not username:
+        return jsonify({"error": "Нет username"})
+    try:
+        analyses = get_recent_analyses(username, limit=limit)
+        return jsonify(analyses)
+    except Exception as e:
+        logging.warning("recent_analyses failed: %s", e)
         return jsonify({"error": str(e)})
 
 
@@ -646,22 +722,41 @@ def api_unprocessed_count():
 
 @app.route('/api/send', methods=['POST'])
 def send_message():
+    """Добавить заметку от своего имени в историю чата (без отправки в WeChat).
+
+    Сообщение сохраняется в PostgreSQL с is_self=True и попадает в
+    последующий AI-анализ вместе с остальной перепиской.
+    """
     data = request.get_json()
     username = data.get("username", "")
     text = (data.get("text") or "").strip()
 
+    if not username:
+        return jsonify({"success": False, "error": "Нет username"})
     if not text:
         return jsonify({"success": False, "error": "Пустой текст"})
 
-    db = get_db()
-    if not db:
-        return jsonify({"success": False, "error": "WeChat DB not available on server"})
-
     try:
-        result = quick_send(text, username, verify=True)
-        return jsonify({"success": True})
+        now = int(time.time())
+        # Отрицательный local_id гарантирует отсутствие коллизий с
+        # реальными local_id из базы WeChat
+        local_id = -int(time.time() * 1000)
+        save_message(
+            username=username,
+            local_id=local_id,
+            sender="self",
+            sender_name="Я",
+            content=text,
+            msg_type="文本",
+            create_time=now,
+            is_self=True,
+        )
+        # Пометить чат: есть новые непроанализированные сообщения
+        from wechatauto.analyser.db_ops import mark_has_new_messages
+        mark_has_new_messages(username, True)
+        return jsonify({"success": True, "create_time": now})
     except Exception as e:
-        logging.warning("quick_send failed: %s", e)
+        logging.warning("save self-note failed: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)})
 
 
@@ -725,11 +820,13 @@ def api_messages():
     except Exception:
         offset = 0
 
-    # 1. Пробуем PostgreSQL (быстро) — если есть достаточно сообщений
+    # 1. Пробуем PostgreSQL (быстро) — всегда, если есть хотя бы одно сообщение
     try:
         pg_count = get_pg_message_count(username)
-        if pg_count >= limit + offset:
-            return jsonify(_format_pg_messages(username, limit, offset, pg_count))
+        if pg_count > 0:
+            # Загружаем из PG, даже если меньше лимита
+            actual_limit = min(limit, pg_count - offset)
+            return jsonify(_format_pg_messages(username, actual_limit, offset, pg_count))
     except Exception as e:
         logging.warning("PG messages failed for %s, fallback to WeChatDB: %s", username, e)
 

@@ -24,6 +24,7 @@ h1 { font-size: 1.5rem; color: #333; }
 .chat-avatar-fallback { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; color: white; font-weight: 600; }
 .chat-name { font-weight: 500; color: #111; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-id { font-size: 0.75rem; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-tags { font-size: 0.7rem; color: #666; margin-top: 0.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-item .menu-btn { background: none; border: none; border-radius: 4px; cursor: pointer; padding: 0.2rem 0.35rem; font-size: 1.1rem; color: #999; flex-shrink: 0; line-height: 1; }
 .chat-item .menu-btn:hover { background: #f0f0f0; color: #333; }
 .chat-item .menu-wrapper { position: relative; flex-shrink: 0; }
@@ -43,6 +44,18 @@ h1 { font-size: 1.5rem; color: #333; }
 .add-pin-dropdown .add-item:hover { background: #e3f2fd; }
 .add-pin-dropdown .add-item .add-icon { color: #2196f3; font-weight: bold; }
 #messages { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; }
+/* Main body: chat pane + analysis pane */
+.main-body { display: none; flex: 1; min-height: 0; flex-direction: column; }
+.main-body.show { display: flex; }
+.chat-pane { display: none; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
+.chat-pane.show { display: flex; }
+/* Wide screens: chat left, analysis right, no tabs */
+@media (min-width: 1400px) {
+    .main-body.show { flex-direction: row; }
+    .chat-pane.show, .main-body.show #analys-content.show { flex: 1 1 50%; min-width: 0; }
+    .main-body.show .chat-pane { border-right: 1px solid #eee; }
+    .view-toggle { display: none; }
+}
 .message { margin-bottom: 0.75rem; max-width: 70%; word-break: break-word; overflow-wrap: break-word; }
 .message.self { margin-left: auto; text-align: right; }
 .message .sender { font-size: 0.75rem; color: #888; margin-bottom: 0.25rem; }
@@ -117,9 +130,14 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .md-body h3 { font-size: 1.02rem; margin: 0.7rem 0 0.35rem; color: #1976d2; }
 .md-body h4, .md-body h5, .md-body h6 { font-size: 0.95rem; margin: 0.6rem 0 0.3rem; color: #37474f; }
 .md-body p { margin: 0.45rem 0; }
-.md-body ul, .md-body ol { margin: 0.4rem 0; padding-left: 1.5rem; }
-.md-body li { margin: 0.2rem 0; }
-.md-body li > ul, .md-body li > ol { margin: 0.15rem 0; }
+.md-body ul, .md-body ol { margin: 0.5rem 0 0.5rem 0.1rem; padding-left: 1.6rem; }
+.md-body ul { list-style: disc; }
+.md-body ul ul { list-style: circle; }
+.md-body ol { list-style: decimal; }
+.md-body ol ol { list-style: lower-alpha; }
+.md-body li { margin: 0.25rem 0; padding-left: 0.1rem; line-height: 1.6; }
+.md-body li::marker { color: #1565c0; font-weight: 600; }
+.md-body li > ul, .md-body li > ol { margin: 0.2rem 0 0.2rem 0.1rem; padding-left: 1.4rem; }
 .md-body strong { color: #111; font-weight: 600; }
 .md-body em { color: #455a64; }
 .md-body code { background: #f4f6f8; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85rem; font-family: 'Consolas', 'Monaco', monospace; color: #d63384; }
@@ -145,16 +163,16 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .meta-analys-banner .meta-close { float: right; background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #999; padding: 0 0.25rem; }
 .meta-analys-banner .meta-close:hover { color: #333; }
 /* Modal */
-.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 100; align-items: center; justify-content: center; }
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4); z-index: 100; align-items: center; justify-content: center; padding: 1rem; }
 .modal-overlay.show { display: flex; }
-.modal { background: white; border-radius: 12px; width: 90%; max-width: 600px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+.modal { background: white; border-radius: 12px; width: 90%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.2); margin: auto; }
 .modal-header { padding: 1rem; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-.modal-header h2 { font-size: 1.1rem; color: #333; }
+.modal-header h2, .modal-header h3 { font-size: 1.1rem; color: #333; }
 .modal-header .close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #999; padding: 0 0.25rem; }
 .modal-header .close-btn:hover { color: #333; }
 .modal-body { padding: 1rem; overflow-y: auto; flex: 1; }
 .modal-body label { display: block; font-size: 0.9rem; color: #555; margin-bottom: 0.5rem; }
-.modal-body textarea { width: 100%; min-height: 120px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; resize: vertical; font-family: inherit; }
+.modal-body textarea { width: 100%; min-height: 420px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; resize: vertical; font-family: inherit; }
 .modal-body .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
 .modal-body .toggle-row input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
 .modal-body .toggle-row label { margin-bottom: 0; cursor: pointer; }
@@ -197,7 +215,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
                 <button id="view-chat-btn" class="active" onclick="switchView('chat')">Переписка</button>
                 <button id="view-analys-btn" onclick="switchView('analys')">Анализ</button>
             </div>
-            <button class="header-btn analys-btn" id="run-analys-btn" onclick="runAnalys()">Анализ</button>
+            <button class="header-btn analys-btn" id="run-analys-btn" onclick="runAnalys()">Проанализировать</button>
         </div>
 
         <!-- Meta analys result banner -->
@@ -206,20 +224,43 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
             <div class="meta-text md-body" id="meta-analys-text"></div>
         </div>
 
-        <!-- Messages view -->
-        <div id="messages" style="display: none;"></div>
+        <!-- Messages + Analysis panes -->
+        <div class="main-body" id="main-body">
+            <div class="chat-pane" id="chat-pane">
+                <div id="messages" style="display: none;"></div>
+                <div class="input-area" id="input-area" style="display: none;">
+                    <input type="text" id="message-input" placeholder="Введите сообщение...">
+                    <button onclick="sendMessage()">Отправить</button>
+                </div>
+            </div>
 
-        <!-- Analysis view -->
-        <div id="analys-content">
-            <div class="analys-empty" id="analys-empty">Выберите чат, чтобы увидеть анализ</div>
-            <div class="analys-text md-body" id="analys-text" style="display:none;"></div>
-            <div class="analys-loading" id="analys-loading" style="display:none;">Выполнение анализа</div>
-            <div class="analys-error" id="analys-error" style="display:none;"></div>
+            <div id="analys-content">
+                <div class="analys-empty" id="analys-empty">Выберите чат, чтобы увидеть анализ</div>
+                <div class="analys-actions" id="analys-actions" style="display:none; margin-bottom: 1rem;">
+                    <button class="btn btn-secondary" onclick="reanalyzeCurrentChat()">Переделать</button>
+                    <button class="btn btn-secondary" onclick="viewCurrentPrompt()">Посмотреть запрос</button>
+                </div>
+                <div class="analys-text md-body" id="analys-text" style="display:none;"></div>
+                <div class="analys-loading" id="analys-loading" style="display:none;">Выполнение анализа</div>
+                <div class="analys-error" id="analys-error" style="display:none;"></div>
+            </div>
         </div>
 
-        <div class="input-area" id="input-area" style="display: none;">
-            <input type="text" id="message-input" placeholder="Введите сообщение...">
-            <button onclick="sendMessage()">Отправить</button>
+        <!-- Prompt modal -->
+        <div class="modal-overlay" id="prompt-modal">
+            <div class="modal" style="max-width: 800px; width: 95%;">
+                <div class="modal-header">
+                    <h3>Использованный промпт</h3>
+                    <button class="modal-close" onclick="closePromptModal()">&times;</button>
+                </div>
+                <div class="modal-body" style="padding: 1.5rem;">
+                    <pre id="prompt-text" style="white-space: pre-wrap; max-height: 65vh; overflow-y: auto; background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 1rem; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 0.85rem; line-height: 1.5; margin: 0;"></pre>
+                </div>
+                <div class="modal-footer" style="padding: 1rem 1.5rem; border-top: 1px solid #eee; gap: 0.5rem;">
+                    <button class="btn btn-secondary" onclick="copyPromptToClipboard()">📋 Копировать</button>
+                    <button class="btn btn-primary" onclick="closePromptModal()">Закрыть</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -227,6 +268,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 <script id="data-json" type="application/json">{{ data_json|safe }}</script>
 <script>
 let currentChat = null;
+let currentChatUsernameForTags = null;
 let data = JSON.parse(document.getElementById('data-json').textContent);
 let searchQuery = '';
 let promptData = null;
@@ -397,12 +439,14 @@ function renderChatItem(s) {
         <div class="chat-info">
             <div class="chat-name">${icon} ${escapeHtml(s.display_name)} ${newDot} ${hasAnalys}</div>
             <div class="chat-id">${escapeHtml(s.username)}</div>
+            ${s.tags ? `<div class="chat-tags">🏷️ ${escapeHtml(s.tags)}</div>` : ''}
         </div>
         <div class="menu-wrapper">
             <button class="menu-btn" onclick="event.stopPropagation();toggleMenu('${s.username}')" title="Действия">⋯</button>
             <div class="menu-dropdown" id="${menuId}">
                 <div class="menu-dropdown-item" onclick="event.stopPropagation();openChatPromptModal('${s.username}')">🤖 Промт</div>
                 <div class="menu-dropdown-item" onclick="event.stopPropagation();openAnalysisHistory('${s.username}')">📜 Анализы</div>
+                <div class="menu-dropdown-item" onclick="event.stopPropagation();openChatTagsModal('${s.username}')">🏷️ Теги</div>
                 <div class="menu-dropdown-item unpin" onclick="event.stopPropagation();unpinChat('${s.username}')">Открепить</div>
                 <div class="menu-dropdown-item" style="color:#e65100;" onclick="event.stopPropagation();unpinAndCleanup('${s.username}')">🗑 Открепить и очистить</div>
             </div>
@@ -486,15 +530,16 @@ async function selectChat(username) {
     document.getElementById('view-chat-btn').classList.add('active');
     document.getElementById('view-analys-btn').classList.remove('active');
 
-    // Show messages, hide analysis
-    document.getElementById('messages').style.display = 'block';
-    document.getElementById('input-area').style.display = 'flex';
-    document.getElementById('analys-content').classList.remove('show');
+    // Show panes according to layout (wide: both, narrow: chat only)
+    applyViewLayout();
+    if (WIDE_LAYOUT_MQ.matches) {
+        loadAnalysView(username);
+    }
 
     // Reset analys button
     const btn = document.getElementById('run-analys-btn');
     btn.disabled = false;
-    btn.textContent = 'Анализ';
+    btn.textContent = 'Проанализировать';
     btn.classList.remove('loading');
 
     await loadMessages(username);
@@ -531,7 +576,7 @@ function messageHtml(m, idx, username) {
             const targetIdx = (m.quote_local_id != null)
                 ? loadedMsgs.findIndex(x => x.local_id === m.quote_local_id) : -1;
             bodyHtml += `
-            <div class="quote-block" ${targetIdx >= 0 ? `onclick="scrollToMessage(${targetIdx})"` : ''} title="Перейти к цитируемому сообщению">
+            <div class="quote-block" ${m.quote_local_id != null ? `onclick="scrollToMessage(${m.quote_local_id})"` : ''} title="Перейти к цитируемому сообщению">
                 <div class="quote-sender">${escapeHtml(m.quote_sender || '')}</div>
                 <div class="quote-text">${escapeHtml(m.quote).replace(/\n/g, '<br>')}</div>
             </div>`;
@@ -539,7 +584,7 @@ function messageHtml(m, idx, username) {
         bodyHtml += `<div class="content">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
     }
     return `
-    <div class="message ${m.is_self ? 'self' : ''} ${m.is_sys ? 'sys' : ''}" data-msg-id="${idx}">
+    <div class="message ${m.is_self ? 'self' : ''} ${m.is_sys ? 'sys' : ''}" data-msg-id="${idx}" data-local-id="${m.local_id != null ? m.local_id : ''}">
         ${!m.is_self ? `<div class="sender">${escapeHtml(m.sender)}<span class="sender-id">${escapeHtml(m.id)}</span></div>` : ''}
         ${bodyHtml}
         <div class="time">${m.time}</div>
@@ -628,24 +673,50 @@ renderSessions();
 
 // ─── Переключение между чатом и анализом ────────────────────────
 
-function switchView(view) {
-    if (!currentChat) return;
-    currentView = view;
+const WIDE_LAYOUT_MQ = window.matchMedia('(min-width: 1400px)');
 
+function applyViewLayout() {
+    if (!currentChat) return;
+    const mainBody = document.getElementById('main-body');
+    const chatPane = document.getElementById('chat-pane');
+    const analysEl = document.getElementById('analys-content');
+    const messagesEl = document.getElementById('messages');
+    mainBody.classList.add('show');
+
+    if (WIDE_LAYOUT_MQ.matches) {
+        // Широкий экран: чат слева + анализ справа одновременно, без вкладок
+        chatPane.classList.add('show');
+        messagesEl.style.display = 'block';
+        analysEl.classList.add('show');
+        document.getElementById('input-area').style.display = 'flex';
+        return;
+    }
+
+    const view = currentView || 'chat';
     document.getElementById('view-chat-btn').classList.toggle('active', view === 'chat');
     document.getElementById('view-analys-btn').classList.toggle('active', view === 'analys');
 
     if (view === 'chat') {
-        document.getElementById('messages').style.display = 'block';
+        chatPane.classList.add('show');
+        messagesEl.style.display = 'block';
         document.getElementById('input-area').style.display = 'flex';
-        document.getElementById('analys-content').classList.remove('show');
+        analysEl.classList.remove('show');
     } else {
-        document.getElementById('messages').style.display = 'none';
+        chatPane.classList.remove('show');
+        messagesEl.style.display = 'none';
         document.getElementById('input-area').style.display = 'none';
-        document.getElementById('analys-content').classList.add('show');
+        analysEl.classList.add('show');
         loadAnalysView(currentChat.username);
     }
 }
+
+function switchView(view) {
+    if (!currentChat) return;
+    currentView = view;
+    applyViewLayout();
+}
+
+WIDE_LAYOUT_MQ.addEventListener('change', () => applyViewLayout());
 
 // ─── Загрузка анализа ──────────────────────────────────────────
 
@@ -677,9 +748,12 @@ async function loadAnalysView(username) {
             if (data.token_usage) {
                 textEl.innerHTML += '<div class="token-usage">🔤 ' + data.token_usage.prompt_tokens + ' → ' + data.token_usage.completion_tokens + ' = ' + data.token_usage.total_tokens + ' токенов</div>';
             }
+            // Show action buttons
+            document.getElementById('analys-actions').style.display = 'block';
         } else {
-            emptyEl.textContent = 'Анализ пока не выполнен. Нажмите кнопку "Анализ" для запуска.';
+            emptyEl.textContent = 'Анализ пока не выполнен. Нажмите кнопку "Проанализировать" для запуска.';
             emptyEl.style.display = 'block';
+            document.getElementById('analys-actions').style.display = 'none';
         }
     } catch (e) {
         errorEl.textContent = 'Ошибка загрузки анализа';
@@ -703,6 +777,27 @@ function renderMarkdown(src) {
         return '\n\u0000CODE' + (codeBlocks.length - 1) + '\u0000\n';
     });
 
+    // 2. AI (Doubao/DeepSeek) часто помещает многострочные нумерованные /
+    //    маркированные списки в ОДНУ строку с разделителями <br>.
+    //    Разворачиваем <br> в \n внутри «однострочных списков», состоящий
+    //    из КАЖДОГО пункта вида "1.X", "2) X", "- X".
+    {
+        const blobRe = /^.*?(?:<br\s*\/?>|<br>).*?$/gim;
+        src = src.replace(blobRe, (blob) => {
+            const pieces = blob.split(/<br\s*\/?>|<br>/i);
+            const looksLikeList = (s) => {
+                const t = (s || '').trim();
+                if (!t) return true; // пустые кусочки OK
+                return /^\d+(\.|\))/.test(t) || /^[-*+]\s+/.test(t) || /^\d+\)\s*/.test(t);
+            };
+            const nonEmpty = pieces.filter(s => s.trim().length > 0);
+            if (nonEmpty.length >= 2 && nonEmpty.every(looksLikeList)) {
+                return '\n' + pieces.join('\n') + '\n';
+            }
+            return blob;
+        });
+    }
+
     const lines = src.split('\n');
     let html = '';
     let i = 0;
@@ -711,7 +806,8 @@ function renderMarkdown(src) {
         /^\s*\u0000CODE\d+\u0000\s*$/.test(ln) ||
         /^(#{1,6})\s+/.test(ln) ||
         /^\s*[-*+]\s+/.test(ln) ||
-        /^\s*\d+\.\s+/.test(ln) ||
+        /^\s*\d+\.\s*/.test(ln) ||
+        /^\s*\d+\)\s*/.test(ln) ||
         /^>/.test(ln) ||
         /^\s*\|.*\|\s*$/.test(ln) ||
         /^\s*([-*_])(\s*\1){2,}\s*$/.test(ln);
@@ -776,11 +872,13 @@ function renderMarkdown(src) {
             continue;
         }
 
-        // Нумерованные списки
-        if (/^\s*\d+\.\s+/.test(line)) {
+        // Нумерованные списки (разрешаем и вид "1.Текст" без пробела —
+        // AI часто генерирует именно так, а также "1) Текст").
+        const olRe = /^\s*\d+(\.|\))\s*/;
+        if (olRe.test(line)) {
             const items = [];
-            while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-                items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+            while (i < lines.length && olRe.test(lines[i])) {
+                items.push(lines[i].replace(olRe, ''));
                 i++;
             }
             html += '<ol>' + items.map(t => '<li>' + mdInline(t) + '</li>').join('') + '</ol>';
@@ -807,7 +905,7 @@ function mdInline(text) {
 
     // Спец-ссылки WeChat: [#msg:ID] и [chat:username] — защищаем плейсхолдерами
     const specials = [];
-    s = s.replace(/\[#msg:(\d+)\]/g, (m, id) => {
+    s = s.replace(/\[#msg:(-?\d+)\]/g, (m, id) => {
         specials.push(`<a href="#" onclick="scrollToMessage('${id}');return false;" title="Перейти к сообщению #${id}">[#msg:${id}]</a>`);
         return '\u0001S' + (specials.length - 1) + '\u0001';
     });
@@ -838,11 +936,11 @@ function mdInline(text) {
     return s;
 }
 
-function scrollToMessage(msgId) {
+function scrollToMessage(localId) {
     // Switch to chat view and scroll to message (if loaded)
     switchView('chat');
-    // Try to find and highlight the message
-    const msgEl = document.querySelector(`[data-msg-id="${msgId}"]`);
+    // Ищем по local_id (используется и в ссылках анализа [#msg:ID], и в цитатах)
+    const msgEl = document.querySelector(`[data-local-id="${localId}"]`);
     if (msgEl) {
         msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         msgEl.style.background = '#fff9c4';
@@ -866,10 +964,13 @@ async function runAnalys() {
         const countData = await countRes.json();
         const newCount = countData.count || 0;
 
-        if (newCount === 0) {
+        const item0 = findItem(currentChat.username);
+        const hasAnalys = !!(item0 && item0.has_analys);
+
+        if (newCount === 0 && hasAnalys) {
             // Нет новых сообщений — показать готовый анализ
             btn.disabled = false;
-            btn.textContent = 'Анализ';
+            btn.textContent = 'Проанализировать';
             btn.classList.remove('loading');
 
             const status = document.getElementById('sync-status');
@@ -884,13 +985,30 @@ async function runAnalys() {
             return;
         }
 
-        // 2. Есть новые сообщения — запустить анализ
-        btn.textContent = `Анализ (${newCount} сообщ.)...`;
+        if (newCount === 0 && !hasAnalys) {
+            // Анализа ещё нет и новых сообщений нет: если в базе нет вообще
+            // сообщений — подсказать синхронизацию, иначе форсировать анализ.
+            const msgRes = await fetch(`/api/messages?username=${encodeURIComponent(currentChat.username)}&limit=1`);
+            const msgData = await msgRes.json();
+            const totalMsgs = (msgData.messages && msgData.messages.length) ? (msgData.total || msgData.messages.length) : 0;
+            if (!totalMsgs) {
+                btn.disabled = false;
+                btn.textContent = 'Проанализировать';
+                btn.classList.remove('loading');
+                const status = document.getElementById('sync-status');
+                status.textContent = '⚠️ Нет сообщений в базе — нажмите «Синхронизация»';
+                setTimeout(() => updateSyncStatus(), 5000);
+                return;
+            }
+        }
+
+        // Есть новые сообщения (или требуется первый анализ) — запустить анализ
+        btn.textContent = newCount > 0 ? `Анализ (${newCount} сообщ.)...` : 'Анализ...';
 
         const res = await fetch('/api/run_analys', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: currentChat.username })
+            body: JSON.stringify({ username: currentChat.username, force: true })
         });
         const result = await res.json();
 
@@ -931,7 +1049,7 @@ async function runAnalys() {
         alert('Ошибка сети: ' + e.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Анализ';
+        btn.textContent = 'Проанализировать';
         btn.classList.remove('loading');
     }
 }
@@ -985,7 +1103,7 @@ async function updateAnalysStatus(username) {
         const data = await res.json();
         if (data && data.has_new_messages) {
             const btn = document.getElementById('run-analys-btn');
-            btn.textContent = '🔴 Анализ';
+            btn.textContent = '🔴 Проанализировать';
             btn.title = 'Есть новые сообщения для анализа';
         }
     } catch (e) {
@@ -1035,6 +1153,104 @@ async function updateSyncStatus() {
     } catch (e) {
         // ignore
     }
+}
+
+// Prompt modal functions
+function closePromptModal() {
+    document.getElementById('prompt-modal').classList.remove('show');
+}
+
+function copyPromptToClipboard() {
+    const promptText = document.getElementById('prompt-text').textContent;
+    navigator.clipboard.writeText(promptText).then(() => {
+        const originalText = document.querySelector('.modal-footer .btn-secondary').textContent;
+        document.querySelector('.modal-footer .btn-secondary').textContent = '✅ Скопировано!';
+        setTimeout(() => {
+            document.querySelector('.modal-footer .btn-secondary').textContent = '📋 Копировать';
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy prompt: ', err);
+        alert('Не удалось скопировать текст в буфер обмена');
+    });
+}
+
+function viewCurrentPrompt() {
+    if (!currentChat) return;
+    
+    fetch(`/api/recent_analyses?username=${encodeURIComponent(currentChat.username)}&limit=1`)
+        .then(res => res.json())
+        .then(data => {
+            if (Array.isArray(data) && data.length > 0) {
+                const prompt = data[0].prompt_used || 'Промпт не сохранён';
+                document.getElementById('prompt-text').textContent = prompt;
+                document.getElementById('prompt-modal').classList.add('show');
+            } else {
+                alert('Нет истории анализов для этого чата');
+            }
+        })
+        .catch(err => {
+            console.error('Error loading prompt:', err);
+            alert('Ошибка при загрузке промпта');
+        });
+}
+
+function reanalyzeCurrentChat() {
+    if (!currentChat) return;
+    
+    const btn = document.getElementById('run-analys-btn');
+    btn.disabled = true;
+    btn.textContent = 'Пересборка...';
+    btn.classList.add('loading');
+    
+    fetch('/api/run_analys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            username: currentChat.username,
+            force: true
+        })
+    })
+    .then(res => res.json())
+    .then(result => {
+        btn.disabled = false;
+        btn.textContent = 'Проанализировать';
+        btn.classList.remove('loading');
+        
+        if (result.success) {
+            // Update chat list
+            const item = findItem(currentChat.username);
+            if (item) {
+                item.has_new_messages = false;
+                item.has_analys = true;
+            }
+            renderSessions();
+            
+            // Reload analysis view
+            loadAnalysView(currentChat.username);
+            
+            // Show notification
+            const status = document.getElementById('sync-status');
+            let statusMsg = `✅ Анализ завершён (${result.new_count || 0} сообщ.)`;
+            if (result.token_usage) {
+                statusMsg += ` 🔤 ${result.token_usage.total_tokens} токенов`;
+            }
+            status.textContent = statusMsg;
+            setTimeout(() => updateSyncStatus(), 3000);
+            
+            updateMetaAnalysVisibility();
+        } else {
+            const errorEl = document.getElementById('analys-error');
+            errorEl.textContent = 'Ошибка: ' + (result.error || 'неизвестная ошибка');
+            errorEl.style.display = 'block';
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.textContent = 'Проанализировать';
+        btn.classList.remove('loading');
+        console.error('Reanalyze error:', err);
+        alert('Ошибка при пересборке анализа: ' + err.message);
+    });
 }
 
 updateSyncStatus();
@@ -1094,6 +1310,24 @@ updateSyncStatus();
         <div class="modal-footer">
             <button class="btn-cancel" onclick="closeChatPromptModal()">Отмена</button>
             <button class="btn-save" onclick="saveChatPrompt()">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно: теги чата -->
+<div class="modal-overlay" id="chat-tags-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="chat-tags-title">Теги для чата</h2>
+            <button class="close-btn" onclick="closeChatTagsModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <label>Теги (разделяйте запятыми, например: работа, личные, друзья)</label>
+            <input type="text" id="chat-tags-input" placeholder="работа, друзья, личные">
+        </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick="closeChatTagsModal()">Отмена</button>
+            <button class="btn-save" onclick="saveChatTags()">Сохранить</button>
         </div>
     </div>
 </div>
@@ -1204,6 +1438,45 @@ async function saveChatPrompt() {
     }
 }
 
+async function openChatTagsModal(username) {
+    currentChatUsernameForTags = username;
+    const item = findItem(username);
+    const title = document.getElementById('chat-tags-title');
+    title.textContent = 'Теги для: ' + (item ? item.display_name : username);
+    
+    // Загрузить текущие теги
+    const tags = item?.tags || '';
+    document.getElementById('chat-tags-input').value = tags;
+    
+    document.getElementById('chat-tags-modal').classList.add('show');
+}
+
+function closeChatTagsModal() {
+    document.getElementById('chat-tags-modal').classList.remove('show');
+    currentChatUsernameForTags = null;
+}
+
+async function saveChatTags() {
+    if (!currentChatUsernameForTags) return;
+    
+    const tags = document.getElementById('chat-tags-input').value.trim();
+    const res = await fetch('/api/update_chat_tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: currentChatUsernameForTags, tags: tags })
+    });
+    const result = await res.json();
+    
+    if (result.success) {
+        const item = findItem(currentChatUsernameForTags);
+        if (item) item.tags = tags;
+        closeChatTagsModal();
+        renderSessions();
+    } else {
+        alert('Ошибка сохранения тегов: ' + (result.error || 'unknown'));
+    }
+}
+
 // ─── История AI-анализов ────────────────────────────────────
 
 async function openAnalysisHistory(username) {
@@ -1217,7 +1490,7 @@ async function openAnalysisHistory(username) {
 
     try {
         const res = await fetch(`/api/ai_analysis_history?username=${encodeURIComponent(username)}&limit=50`);
-        const data = await res.json();
+         const data = await res.json();
 
         if (data.error) {
             body.innerHTML = `<div style="color:#c62828;padding:1rem;">Ошибка: ${escapeHtml(data.error)}</div>`;

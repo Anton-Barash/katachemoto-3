@@ -60,18 +60,32 @@ def sync_all_pinned(db, progress_callback=None) -> Dict[str, dict]:
 def _sync_chat(db, username: str) -> dict:
     """Синхронизировать один чат."""
     last_sync = get_last_sync_time(username)
+
+    # Быстрая проверка: берём только 1 самое новое сообщение из WeChat.
+    # Если оно не новее last_sync — новых сообщений нет, чат пропускаем
+    # (не тратим время на расшифровку всей истории).
+    try:
+        newest = list(db.get_messages(username, limit=1))
+    except Exception as e:
+        raise RuntimeError(f"WeChatDB.get_messages failed: {e}") from e
+
+    if not newest:
+        pg_stats = get_message_stats(username)
+        return {"saved": 0, "total": pg_stats["total"], "new": 0}
+
+    newest_time = newest[0].get("create_time", 0) or 0
+    if newest_time <= last_sync:
+        # Новых сообщений нет — пропускаем чат полностью
+        pg_stats = get_message_stats(username)
+        return {"saved": 0, "total": pg_stats["total"], "new": 0}
+
     max_create_time = last_sync
 
-    # Загрузить сообщения из WeChat (самые новые сначала)
+    # Есть новые сообщения — загружаем батч (самые новые сначала)
     try:
         wechat_msgs = list(db.get_messages(username, limit=SYNC_BATCH_SIZE))
     except Exception as e:
         raise RuntimeError(f"WeChatDB.get_messages failed: {e}") from e
-
-    if not wechat_msgs:
-        # Нет сообщений в WeChat для этого чата
-        pg_stats = get_message_stats(username)
-        return {"saved": 0, "total": pg_stats["total"], "new": 0}
 
     # wechat_msgs приходят от newest к oldest
     # Ищем новые сообщения (create_time > last_sync)
@@ -103,6 +117,9 @@ def _sync_chat(db, username: str) -> dict:
                 msg_type=m.get("type", "") or "",
                 create_time=ct,
                 is_self=m.get("sender_id") == 2,
+                quote_content=m.get("quote_content", "") or "",
+                quote_sender=m.get("quote_sender", "") or "",
+                quote_display=m.get("quote_display", "") or "",
             )
             saved += 1
             if ct > max_saved_time:

@@ -9,6 +9,7 @@
 """
 
 from .core import run_analys, run_meta_analys, get_analys_status, get_chat_analys, get_meta_analyses_history
+from typing import Optional, Dict, List
 
 __all__ = [
     "run_analys",

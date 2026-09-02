@@ -1268,11 +1268,6 @@ class WeChatDB:
             if not sender_username:
                 # fallback: 尝试从 contact.db 获取昵称
                 sender_username = self.get_nickname(str(sender_id))
-        # Лог для отладки: какой sender_id → какой username
-        if sender_id and sender_id not in (2,):
-            nick = self.get_nickname(sender_username) if sender_username else ""
-            logging.debug("msg local_id=%s sender_id=%s → username=%s nick=%s",
-                          r["local_id"], sender_id, sender_username, nick)
         return {
             "local_id": r["local_id"],
             "type": mtype,

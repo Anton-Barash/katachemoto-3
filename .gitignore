@@ -34,3 +34,23 @@ COMMIT_MSG.txt
 
 # sibling repo
 WeChatBot-new/
+
+# Media cache
+media_cache/
+
+# Local config
+config.json
+config.json.bak
+
+# Test files
+/test_*.py
+/test_*.txt
+
+# Generated files
+/deepseek_text_*.txt
+
+# Shortcuts
+*.lnk
+
+# Test media
+/test_media/

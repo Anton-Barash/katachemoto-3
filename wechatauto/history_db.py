@@ -46,6 +46,7 @@ class ChatSetting(Base):
     is_excluded = Column(Boolean, default=False)
     use_global_prompt = Column(Boolean, default=True)
     custom_prompt = Column(Text, nullable=True)
+    tags = Column(String(255), nullable=True, default="")
     last_sync_time = Column(BigInteger, default=0)
     ai_analysis = Column(Text, nullable=True)
     ai_analysis_updated_at = Column(BigInteger, default=0)
@@ -130,6 +131,9 @@ class Message(Base):
     create_time = Column(BigInteger, nullable=True)
     is_self = Column(Boolean, default=False)
     ai_processed = Column(Boolean, default=False)
+    quote_content = Column(Text, nullable=True)
+    quote_sender = Column(String(255), nullable=True)
+    quote_display = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -151,12 +155,51 @@ def get_session() -> Session:
     return _SessionLocal()
 
 
+def _migrate_ai_analyses_constraints(engine):
+    """Удалить лишнее уникальное ограничение на username в таблице ai_analyses."""
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT 1 FROM pg_constraint "
+                    "WHERE conrelid = 'ai_analyses'::regclass "
+                    "AND conname = 'unique_ai_analysis_username'"
+                )
+            ).fetchone()
+            if row:
+                conn.execute(text('ALTER TABLE ai_analyses DROP CONSTRAINT "unique_ai_analysis_username"'))
+                conn.commit()
+                logging.info("Удалено уникальное ограничение unique_ai_analysis_username из таблицы ai_analyses")
+    except Exception as e:
+        logging.warning("Не удалось удалить ограничение unique_ai_analysis_username: %s", e)
+
+
+def _migrate_ai_analyses_prompt_column(engine):
+    """Добавить колонку prompt_used в таблицу ai_analyses, если она отсутствует."""
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+        columns = {c["name"] for c in inspector.get_columns("ai_analyses")}
+        if "prompt_used" not in columns:
+            with engine.connect() as conn:
+                conn.execute(text(f'ALTER TABLE ai_analyses ADD COLUMN prompt_used TEXT'))
+                conn.commit()
+                logging.info("Добавлена колонка prompt_used в таблицу ai_analyses")
+    except Exception as e:
+        logging.warning("Не удалось добавить колонку prompt_used: %s", e)
+
+
+
+
 def init_db():
     """Создать таблицы, если их нет, и выполнить миграцию колонок."""
     engine = get_engine()
     Base.metadata.create_all(engine)
     _migrate_chat_settings_columns(engine)
     _migrate_messages_columns(engine)
+    _migrate_ai_analyses_constraints(engine)
+    _migrate_ai_analyses_prompt_column(engine)
     logging.info("PostgreSQL tables created/verified")
 
 
@@ -170,6 +213,7 @@ def _migrate_chat_settings_columns(engine):
         "analys_last_msg_id": "BIGINT",
         "analys": "TEXT",
         "analys_updated_at": "BIGINT DEFAULT 0",
+        "tags": "VARCHAR(255) DEFAULT ''",
     }
 
     added = 0
@@ -195,6 +239,9 @@ def _migrate_messages_columns(engine):
 
     new_columns = {
         "media_path": "TEXT",
+        "quote_content": "TEXT",
+        "quote_sender": "VARCHAR(255)",
+        "quote_display": "VARCHAR(500)",
     }
 
     with engine.connect() as conn:
@@ -235,6 +282,7 @@ def get_all_settings() -> Dict[str, dict]:
                 "has_new_messages": r.has_new_messages,
                 "analys": r.analys,
                 "analys_updated_at": r.analys_updated_at,
+                "tags": r.tags or "",
             }
         return result
     finally:
@@ -262,6 +310,7 @@ def get_setting(username: str) -> Optional[dict]:
             "has_new_messages": r.has_new_messages,
             "analys": r.analys,
             "analys_updated_at": r.analys_updated_at,
+            "tags": r.tags or "",
         }
     finally:
         session.close()
@@ -343,7 +392,9 @@ def save_message(username: str, local_id: int, sender: str = "",
                  sender_name: str = "", content: str = "",
                  media_path: str = "",
                  msg_type: str = "", create_time: int = 0,
-                 is_self: bool = False) -> None:
+                 is_self: bool = False,
+                 quote_content: str = "", quote_sender: str = "",
+                 quote_display: str = "") -> None:
     """Сохранить одно сообщение в историю."""
     session = get_session()
     try:
@@ -362,6 +413,9 @@ def save_message(username: str, local_id: int, sender: str = "",
             msg_type=msg_type,
             create_time=create_time,
             is_self=is_self,
+            quote_content=quote_content or None,
+            quote_sender=quote_sender or None,
+            quote_display=quote_display or None,
         )
         session.add(msg)
         session.commit()
