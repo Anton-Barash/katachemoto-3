@@ -120,6 +120,7 @@ def _sync_chat(db, username: str) -> dict:
                 quote_content=m.get("quote_content", "") or "",
                 quote_sender=m.get("quote_sender", "") or "",
                 quote_display=m.get("quote_display", "") or "",
+                quote_local_id=m.get("quote_local_id"),
             )
             saved += 1
             if ct > max_saved_time:

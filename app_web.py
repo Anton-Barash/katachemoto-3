@@ -777,6 +777,17 @@ def _format_pg_messages(username: str, limit: int, offset: int = 0, total: int =
         return nick_index.get(u, u) if u else u
 
     is_group = "@chatroom" in username
+
+    # Для личного чата имя собеседника — алиас чата из chat_settings
+    # (как в промпте анализа), а не ник из contact.db, который может
+    # указывать на другого контакта.
+    chat_alias = ""
+    if not is_group:
+        try:
+            chat_alias = get_aliases().get(username, "")
+        except Exception:
+            chat_alias = ""
+
     formatted = []
     for m in pg_msgs:
         content = m.get("content") or f"[{m.get('msg_type')}]"
@@ -793,10 +804,27 @@ def _format_pg_messages(username: str, limit: int, offset: int = 0, total: int =
         content = prettify_message_content(content, mtype)
         is_sys = bool(content and content[0] in ("🚫", "ℹ️") and isinstance(content, str))
 
+        quote = (m.get("quote_content") or "").strip()
+        quote_sender = ""
+        if quote:
+            q_sender_id = m.get("quote_sender") or ""
+            if not is_group:
+                quote_sender = m.get("quote_display") or chat_alias or _display(q_sender_id)
+            else:
+                quote_sender = m.get("quote_display") or _display(q_sender_id)
+
+        # Для личного чата: имя собеседника — алиас чата, сырой ID не показываем
+        if is_group:
+            sender_display = _display(sender)
+            sender_id = sender
+        else:
+            sender_display = chat_alias or _display(username)
+            sender_id = ""
+
         formatted.append({
             "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(m.get("create_time", 0))),
-            "sender": _display(sender),
-            "id": sender,
+            "sender": sender_display,
+            "id": sender_id,
             "content": content,
             "type": mtype,
             "local_id": m.get("local_id"),
@@ -804,6 +832,9 @@ def _format_pg_messages(username: str, limit: int, offset: int = 0, total: int =
             "is_self": m.get("is_self", False),
             "is_sys": is_sys,
             "media_path": m.get("media_path") or "",
+            "quote": quote,
+            "quote_sender": quote_sender,
+            "quote_local_id": m.get("quote_local_id"),
         })
     return {"messages": formatted, "source": "pg", "total": total, "offset": offset}
 

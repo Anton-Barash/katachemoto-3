@@ -572,16 +572,13 @@ function messageHtml(m, idx, username) {
         bodyHtml = `<div class="content image"><img src="${url}" alt="[图片]" loading="lazy" onerror="imgError(this)" onclick="window.open('${url}','_blank')"></div>`;
     } else {
         if (m.quote) {
-            // цитируемое сообщение ищем в накопленном списке
-            const targetIdx = (m.quote_local_id != null)
-                ? loadedMsgs.findIndex(x => x.local_id === m.quote_local_id) : -1;
             bodyHtml += `
             <div class="quote-block" ${m.quote_local_id != null ? `onclick="scrollToMessage(${m.quote_local_id})"` : ''} title="Перейти к цитируемому сообщению">
-                <div class="quote-sender">${escapeHtml(m.quote_sender || '')}</div>
-                <div class="quote-text">${escapeHtml(m.quote).replace(/\n/g, '<br>')}</div>
+                <div class="quote-text">${escapeHtml('Вопрос: ' + m.quote).replace(/\n/g, '<br>')}</div>
             </div>`;
         }
-        bodyHtml += `<div class="content">${escapeHtml(m.content).replace(/\n/g, '<br>')}</div>`;
+        const contentText = m.quote ? ('Ответ: ' + m.content) : m.content;
+        bodyHtml += `<div class="content">${escapeHtml(contentText).replace(/\n/g, '<br>')}</div>`;
     }
     return `
     <div class="message ${m.is_self ? 'self' : ''} ${m.is_sys ? 'sys' : ''}" data-msg-id="${idx}" data-local-id="${m.local_id != null ? m.local_id : ''}">
@@ -936,15 +933,27 @@ function mdInline(text) {
     return s;
 }
 
-function scrollToMessage(localId) {
+async function scrollToMessage(localId) {
     // Switch to chat view and scroll to message (if loaded)
     switchView('chat');
     // Ищем по local_id (используется и в ссылках анализа [#msg:ID], и в цитатах)
-    const msgEl = document.querySelector(`[data-local-id="${localId}"]`);
+    let msgEl = document.querySelector(`[data-local-id="${localId}"]`);
+    // Если сообщение ещё не загружено (пагинация) — догружаем страницы
+    if (!msgEl && msgSource === 'pg' && msgTotal != null) {
+        for (let i = 0; i < 100 && loadedMsgs.length < msgTotal; i++) {
+            await loadOlderMessages();
+            msgEl = document.querySelector(`[data-local-id="${localId}"]`);
+            if (msgEl) break;
+        }
+    }
     if (msgEl) {
         msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         msgEl.style.background = '#fff9c4';
         setTimeout(() => { msgEl.style.background = ''; }, 2000);
+    } else {
+        const status = document.getElementById('sync-status');
+        status.textContent = '⚠️ Сообщение #' + localId + ' не найдено — выполните синхронизацию';
+        setTimeout(() => updateSyncStatus(), 5000);
     }
 }
 

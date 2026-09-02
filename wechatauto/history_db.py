@@ -134,6 +134,7 @@ class Message(Base):
     quote_content = Column(Text, nullable=True)
     quote_sender = Column(String(255), nullable=True)
     quote_display = Column(String(500), nullable=True)
+    quote_local_id = Column(BigInteger, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -242,6 +243,7 @@ def _migrate_messages_columns(engine):
         "quote_content": "TEXT",
         "quote_sender": "VARCHAR(255)",
         "quote_display": "VARCHAR(500)",
+        "quote_local_id": "BIGINT",
     }
 
     with engine.connect() as conn:
@@ -394,7 +396,7 @@ def save_message(username: str, local_id: int, sender: str = "",
                  msg_type: str = "", create_time: int = 0,
                  is_self: bool = False,
                  quote_content: str = "", quote_sender: str = "",
-                 quote_display: str = "") -> None:
+                 quote_display: str = "", quote_local_id: int = None) -> None:
     """Сохранить одно сообщение в историю."""
     session = get_session()
     try:
@@ -416,6 +418,7 @@ def save_message(username: str, local_id: int, sender: str = "",
             quote_content=quote_content or None,
             quote_sender=quote_sender or None,
             quote_display=quote_display or None,
+            quote_local_id=quote_local_id,
         )
         session.add(msg)
         session.commit()
@@ -450,6 +453,10 @@ def get_messages(username: str, limit: int = 100, offset: int = 0) -> List[dict]
                 "msg_type": r.msg_type,
                 "create_time": r.create_time,
                 "is_self": r.is_self,
+                "quote_content": r.quote_content,
+                "quote_sender": r.quote_sender,
+                "quote_display": r.quote_display,
+                "quote_local_id": r.quote_local_id,
             })
         return result
     finally:
