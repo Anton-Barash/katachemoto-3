@@ -67,6 +67,10 @@ class GlobalSetting(Base):
     id = Column(Integer, primary_key=True, default=1)
     global_prompt = Column(Text, nullable=False,
                            default="сделай краткий пересказ. Выдели задачи и проблемы. Ответ на русском. Какие у кокго задачи?")
+    meta_prompt = Column(Text, nullable=True,
+                         default="Составь краткое суммирование всех анализов чатов: "
+                                 "общая картина, ключевые задачи и проблемы по темам, "
+                                 "наиболее активные чаты. Ответ на русском.")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
@@ -201,7 +205,22 @@ def init_db():
     _migrate_messages_columns(engine)
     _migrate_ai_analyses_constraints(engine)
     _migrate_ai_analyses_prompt_column(engine)
+    _migrate_global_settings_columns(engine)
     logging.info("PostgreSQL tables created/verified")
+
+
+def _migrate_global_settings_columns(engine):
+    """Добавить недостающие колонки в global_settings (миграция без потери данных)."""
+    inspector = inspect(engine)
+    existing_columns = {c["name"] for c in inspector.get_columns("global_settings")}
+    if "meta_prompt" not in existing_columns:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text('ALTER TABLE global_settings ADD COLUMN meta_prompt TEXT'))
+                conn.commit()
+            logging.info("Migrated column meta_prompt to global_settings")
+        except Exception as e:
+            logging.warning("Migration failed for meta_prompt: %s", e)
 
 
 def _migrate_chat_settings_columns(engine):
@@ -489,16 +508,37 @@ def get_global_prompt() -> str:
         session.close()
 
 
-def set_global_prompt(prompt: str) -> None:
-    """Обновить глобальный промт."""
+DEFAULT_META_PROMPT = (
+    "Составь краткое суммирование всех анализов чатов: общая картина, "
+    "ключевые задачи и проблемы по темам, наиболее активные чаты. Ответ на русском."
+)
+
+
+def get_meta_prompt() -> str:
+    """Получить промт мета-анализа (анализа анализов)."""
+    session = get_session()
+    try:
+        gs = session.query(GlobalSetting).filter_by(id=1).first()
+        if gs and gs.meta_prompt and gs.meta_prompt.strip():
+            return gs.meta_prompt
+        return DEFAULT_META_PROMPT
+    finally:
+        session.close()
+
+
+def set_global_prompt(prompt: str, meta_prompt: str = None) -> None:
+    """Обновить глобальный промт (и опционально промт мета-анализа)."""
     session = get_session()
     try:
         gs = session.query(GlobalSetting).filter_by(id=1).first()
         if gs:
             gs.global_prompt = prompt
+            if meta_prompt is not None:
+                gs.meta_prompt = meta_prompt
             gs.updated_at = datetime.now(timezone.utc)
         else:
-            session.add(GlobalSetting(id=1, global_prompt=prompt))
+            session.add(GlobalSetting(id=1, global_prompt=prompt,
+                                      meta_prompt=meta_prompt))
         session.commit()
     except Exception:
         session.rollback()

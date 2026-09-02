@@ -27,7 +27,7 @@ from wechatauto.history_db import (
     init_db, get_all_settings, get_pinned_list, get_aliases,
     set_alias as db_set_alias, set_pinned as db_set_pinned,
     upsert_setting,
-    get_global_prompt, set_global_prompt,
+    get_global_prompt, set_global_prompt, get_meta_prompt,
     get_effective_prompt,
     get_unprocessed_messages, mark_messages_processed,
     get_message_stats,
@@ -473,6 +473,7 @@ def api_prompt_settings():
     """Вернуть глобальный промт и все настройки промтов чатов."""
     try:
         global_prompt = get_global_prompt()
+        meta_prompt = get_meta_prompt()
         settings = get_all_settings()
         chat_prompts = {}
         for u, s in settings.items():
@@ -482,6 +483,7 @@ def api_prompt_settings():
             }
         return jsonify({
             "global_prompt": global_prompt,
+            "meta_prompt": meta_prompt,
             "chat_prompts": chat_prompts,
         })
     except Exception as e:
@@ -493,12 +495,13 @@ def api_prompt_settings():
 def api_update_global_prompt():
     data = request.get_json()
     prompt = data.get("prompt", "").strip()
+    meta_prompt = data.get("meta_prompt")
 
     if not prompt:
         return jsonify({"success": False, "error": "Пустой промт"})
 
     try:
-        set_global_prompt(prompt)
+        set_global_prompt(prompt, meta_prompt=meta_prompt)
         return jsonify({"success": True})
     except Exception as e:
         logging.warning("update_global_prompt failed: %s", e)
@@ -572,6 +575,33 @@ def api_sync_status():
     except Exception as e:
         logging.warning("sync_status failed: %s", e)
         return jsonify({"error": str(e)})
+
+
+@app.route('/api/sync_one', methods=['POST'])
+def api_sync_one():
+    """Синхронизация одного чата (для последовательного режима «Синхр. всё»)."""
+    data = request.get_json()
+    username = data.get("username", "").strip()
+    if not username:
+        return jsonify({"success": False, "error": "username required"})
+
+    db = get_db()
+    if not db:
+        return jsonify({"success": False, "error": "WeChat DB not available"})
+
+    try:
+        from wechatauto.sync_service import _sync_chat
+        stats = _sync_chat(db, username)
+        return jsonify({
+            "success": True,
+            "username": username,
+            "saved": stats.get("saved", 0),
+            "total": stats.get("total", 0),
+            "error": stats.get("error"),
+        })
+    except Exception as e:
+        logging.warning("sync_one failed for %s: %s", username, e)
+        return jsonify({"success": False, "username": username, "error": str(e)})
 
 
 @app.route('/api/unpin_cleanup', methods=['POST'])
@@ -701,6 +731,24 @@ def api_meta_analyses_history():
         return jsonify({"history": history})
     except Exception as e:
         logging.warning("meta_analyses_history failed: %s", e)
+        return jsonify({"error": str(e)})
+
+
+@app.route('/api/meta_analys_last')
+def api_meta_analys_last():
+    """Последний сохранённый общий анализ (мета-анализ)."""
+    try:
+        from wechatauto.analyser.db_ops import get_last_meta_analys
+        data = get_last_meta_analys()
+        if data:
+            return jsonify({
+                "analys": data["analysis"],
+                "chats_count": data["chats_analyzed"],
+                "created_at": data["created_at"].strftime("%Y-%m-%d %H:%M") if data["created_at"] else "",
+            })
+        return jsonify({"analys": ""})
+    except Exception as e:
+        logging.warning("meta_analys_last failed: %s", e)
         return jsonify({"error": str(e)})
 
 

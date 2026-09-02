@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%237B2FF2'/%3E%3Ccircle cx='32' cy='32' r='26' fill='url(%23s)'/%3E%3CradialGradient id='s' cx='0.35' cy='0.3' r='0.9'%3E%3Cstop offset='0%25' stop-color='%23ff8a80'/%3E%3Cstop offset='55%25' stop-color='%23f5533d'/%3E%3Cstop offset='100%25' stop-color='%23d8271c'/%3E%3C/radialGradient%3E%3C/svg%3E">
 <title>wechatauto</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -100,7 +101,9 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .chat-header { display: none; padding: 0.5rem 1rem; border-bottom: 1px solid #eee; align-items: center; gap: 0.5rem; background: #fafafa; }
 .chat-header.show { display: flex; }
 .chat-header .chat-title { flex: 1; min-width: 0; font-weight: 600; font-size: 0.95rem; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-header .header-spacer { flex: 1; }
 .chat-header .header-btn { padding: 0.4rem 0.8rem; font-size: 0.8rem; border-radius: 4px; white-space: nowrap; }
+.chat-header .header-btn.meta-header-btn { padding: 0.4rem 0.6rem; }
 .chat-header .header-btn.analys-btn { background: #7c4dff; }
 .chat-header .header-btn.analys-btn:hover { background: #651fff; }
 .chat-header .header-btn.analys-btn.active { background: #ff6f00; }
@@ -120,6 +123,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 #analys-content .analys-text a { color: #2196f3; text-decoration: none; }
 #analys-content .analys-text a:hover { text-decoration: underline; }
 #analys-content .analys-empty { color: #999; text-align: center; padding: 2rem; }
+#analys-content .meta-label { font-weight: 600; color: #7c4dff; margin-bottom: 0.75rem; font-size: 0.9rem; }
 #analys-content .analys-error { color: #c62828; padding: 1rem; }
 #analys-content .analys-loading { text-align: center; padding: 2rem; color: #666; }
 #analys-content .analys-loading::after { content: ''; display: inline-block; width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #2196f3; border-radius: 50%; animation: spin 0.6s linear infinite; margin-left: 8px; vertical-align: middle; }
@@ -189,7 +193,7 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
     <div style="display:flex;gap:0.5rem;align-items:center;">
         <span id="sync-status" style="font-size:0.8rem;color:#999;"></span>
         <button class="settings-btn" id="sync-btn" onclick="syncMessages()">🔄 Синхр.</button>
-        <button class="settings-btn" id="meta-analys-btn" onclick="runMetaAnalys()">📊 Анализ анализов</button>
+        <button class="settings-btn" id="sync-all-btn" onclick="syncAllSequentially()">⏳ Синхр. всё</button>
         <button class="settings-btn" onclick="openGlobalPromptModal()">🤖 Prompt</button>
         <button class="settings-btn" onclick="location.href='/settings'">⚙️ Настройки</button>
     </div>
@@ -214,8 +218,12 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
             <div class="view-toggle">
                 <button id="view-chat-btn" class="active" onclick="switchView('chat')">Переписка</button>
                 <button id="view-analys-btn" onclick="switchView('analys')">Анализ</button>
+                <button id="view-meta-btn" onclick="showMetaInAnalysView()">Общий анализ</button>
             </div>
+            <span class="header-spacer"></span>
             <button class="header-btn analys-btn" id="run-analys-btn" onclick="runAnalys()">Проанализировать</button>
+            <button class="header-btn analys-btn" id="run-analys-all-btn" onclick="runAnalysAll()" title="Анализ всех чатов один за другим">Анализ всех</button>
+            <button class="header-btn analys-btn meta-header-btn" onclick="runMetaAnalys()" title="Анализ всех анализов чатов">📊</button>
         </div>
 
         <!-- Meta analys result banner -->
@@ -529,6 +537,7 @@ async function selectChat(username) {
     // Reset view toggle
     document.getElementById('view-chat-btn').classList.add('active');
     document.getElementById('view-analys-btn').classList.remove('active');
+    document.getElementById('view-meta-btn').classList.remove('active');
 
     // Show panes according to layout (wide: both, narrow: chat only)
     applyViewLayout();
@@ -681,17 +690,24 @@ function applyViewLayout() {
     mainBody.classList.add('show');
 
     if (WIDE_LAYOUT_MQ.matches) {
-        // Широкий экран: чат слева + анализ справа одновременно, без вкладок
+        // Широкий экран: чат слева + анализ справа одновременно
         chatPane.classList.add('show');
         messagesEl.style.display = 'block';
         analysEl.classList.add('show');
         document.getElementById('input-area').style.display = 'flex';
+        // При явном переключении вкладок перезагружаем содержимое панели анализа
+        const view = currentView || 'chat';
+        if (view === 'analys') {
+            loadAnalysView(currentChat.username);
+        }
+        // view === 'meta': содержимое уже показано showMetaInAnalysView()
         return;
     }
 
     const view = currentView || 'chat';
     document.getElementById('view-chat-btn').classList.toggle('active', view === 'chat');
     document.getElementById('view-analys-btn').classList.toggle('active', view === 'analys');
+    document.getElementById('view-meta-btn').classList.toggle('active', view === 'meta');
 
     if (view === 'chat') {
         chatPane.classList.add('show');
@@ -703,7 +719,10 @@ function applyViewLayout() {
         messagesEl.style.display = 'none';
         document.getElementById('input-area').style.display = 'none';
         analysEl.classList.add('show');
-        loadAnalysView(currentChat.username);
+        if (view === 'analys') {
+            loadAnalysView(currentChat.username);
+        }
+        // view === 'meta': содержимое уже показано showMetaInAnalysView()
     }
 }
 
@@ -959,6 +978,77 @@ async function scrollToMessage(localId) {
 
 // ─── Запуск анализа ───────────────────────────────────────────
 
+// Последовательный анализ всех чатов один за другим
+let analysAllRunning = false;
+
+async function runAnalysAll() {
+    if (analysAllRunning) return;
+    analysAllRunning = true;
+
+    const btn = document.getElementById('run-analys-all-btn');
+    const status = document.getElementById('sync-status');
+    const singleBtn = document.getElementById('run-analys-btn');
+    btn.disabled = true;
+    singleBtn.disabled = true;
+
+    try {
+        // 1. Получить список закреплённых чатов
+        const res = await fetch('/api/sessions');
+        const data = await res.json();
+        const sessions = flattenSessions(data);
+        const pinned = sessions.filter(s => s.is_pinned).map(s => s.username);
+
+        if (!pinned.length) {
+            status.textContent = 'Нет закреплённых чатов';
+            return;
+        }
+
+        let done = 0, failed = 0, totalTokens = 0;
+
+        // 2. Анализировать один за другим
+        for (let i = 0; i < pinned.length; i++) {
+            const u = pinned[i];
+            const session = sessions.find(s => s.username === u);
+            const name = (session && (session.alias || session.nickname)) || u;
+            status.textContent = `🔍 Анализ [${i + 1}/${pinned.length}] ${name}...`;
+
+            try {
+                const r = await fetch('/api/run_analys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, force: true })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    done++;
+                    if (d.token_usage) totalTokens += d.token_usage.total_tokens || 0;
+                    // Обновить флаги чата в списке
+                    const item = findItem(u);
+                    if (item) {
+                        item.has_new_messages = false;
+                        item.has_analys = true;
+                    }
+                } else {
+                    failed++;
+                }
+            } catch (e) {
+                failed++;
+            }
+        }
+
+        status.textContent = `✅ Анализ всех: готово ${done}, ошибок ${failed}` +
+            (totalTokens ? ` 🔤 ${totalTokens} токенов` : '');
+        renderSessions();
+        setTimeout(() => updateSyncStatus(), 5000);
+    } catch (e) {
+        status.textContent = '❌ ' + e.message;
+    } finally {
+        btn.disabled = false;
+        singleBtn.disabled = false;
+        analysAllRunning = false;
+    }
+}
+
 async function runAnalys() {
     if (!currentChat) return;
 
@@ -1066,9 +1156,8 @@ async function runAnalys() {
 // ─── Мета-анализ (анализ анализов) ────────────────────────────
 
 async function runMetaAnalys() {
-    const btn = document.getElementById('meta-analys-btn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Анализ анализов...';
+    const btns = document.querySelectorAll('.meta-header-btn, #meta-analys-btn');
+    btns.forEach(b => { b.disabled = true; });
 
     try {
         const res = await fetch('/api/run_meta_analys', {
@@ -1078,21 +1167,86 @@ async function runMetaAnalys() {
         const result = await res.json();
 
         if (result.success) {
-            const banner = document.getElementById('meta-analys-banner');
-            const text = document.getElementById('meta-analys-text');
-            text.innerHTML = renderAnalysText(result.analys, '');
-            if (result.token_usage) {
-                text.innerHTML += '<div class="token-usage">🔤 ' + result.token_usage.prompt_tokens + ' → ' + result.token_usage.completion_tokens + ' = ' + result.token_usage.total_tokens + ' токенов</div>';
-            }
-            banner.classList.add('show');
+            showMetaResult(result.analys, result.token_usage);
         } else {
             alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
         }
     } catch (e) {
         alert('Ошибка сети: ' + e.message);
     } finally {
-        btn.disabled = false;
-        btn.textContent = '📊 Анализ анализов';
+        btns.forEach(b => { b.disabled = false; });
+    }
+}
+
+// Показать общий анализ в окне анализа (вместо анализа чата)
+function showMetaResult(metaText, tokenUsage) {
+    currentView = 'meta';
+    applyViewLayout();
+
+    const textEl = document.getElementById('analys-text');
+    const emptyEl = document.getElementById('analys-empty');
+    const loadingEl = document.getElementById('analys-loading');
+    const errorEl = document.getElementById('analys-error');
+
+    textEl.style.display = 'none';
+    emptyEl.style.display = 'none';
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'none';
+    document.getElementById('analys-actions').style.display = 'none';
+
+    let html = '<div class="meta-label">📊 Общий анализ (по всем чатам)';
+    html += '</div>';
+    html += renderAnalysText(metaText, '');
+    if (tokenUsage) {
+        html += '<div class="token-usage">🔤 ' + tokenUsage.prompt_tokens + ' → ' + tokenUsage.completion_tokens + ' = ' + tokenUsage.total_tokens + ' токенов</div>';
+    }
+    textEl.innerHTML = html;
+    textEl.style.display = 'block';
+}
+
+// Показать последний сохранённый общий анализ во вью анализа
+async function showMetaInAnalysView() {
+    if (!currentChat) return;
+    currentView = 'meta';
+    applyViewLayout();
+
+    const textEl = document.getElementById('analys-text');
+    const emptyEl = document.getElementById('analys-empty');
+    const loadingEl = document.getElementById('analys-loading');
+    const errorEl = document.getElementById('analys-error');
+
+    textEl.style.display = 'none';
+    emptyEl.style.display = 'none';
+    loadingEl.style.display = 'block';
+    errorEl.style.display = 'none';
+    document.getElementById('analys-actions').style.display = 'none';
+
+    try {
+        const res = await fetch('/api/meta_analys_last');
+        const data = await res.json();
+        loadingEl.style.display = 'none';
+
+        if (data.error) {
+            errorEl.textContent = 'Ошибка: ' + data.error;
+            errorEl.style.display = 'block';
+            return;
+        }
+
+        if (data.analys) {
+            let html = '<div class="meta-label">📊 Общий анализ (по всем чатам)';
+            if (data.created_at) html += ' — от ' + data.created_at;
+            html += '</div>';
+            html += renderAnalysText(data.analys, '');
+            textEl.innerHTML = html;
+            textEl.style.display = 'block';
+        } else {
+            emptyEl.textContent = 'Общий анализ ещё не выполнялся. Нажмите кнопку 📊 рядом с "Проанализировать".';
+            emptyEl.style.display = 'block';
+        }
+    } catch (e) {
+        loadingEl.style.display = 'none';
+        errorEl.textContent = 'Ошибка загрузки общего анализа';
+        errorEl.style.display = 'block';
     }
 }
 
@@ -1125,16 +1279,28 @@ async function updateAnalysStatus(username) {
 async function syncMessages() {
     const btn = document.getElementById('sync-btn');
     const status = document.getElementById('sync-status');
+
+    if (!currentChat) {
+        status.textContent = '⚠️ Выберите чат для синхронизации';
+        setTimeout(() => updateSyncStatus(), 3000);
+        return;
+    }
+
+    const name = currentChat.display_name || currentChat.username;
     btn.disabled = true;
     btn.textContent = '⏳ Синхр...';
-    status.textContent = 'синхронизация...';
+    status.textContent = `⏳ Синхронизация: ${name}...`;
 
     try {
-        const res = await fetch('/api/sync_messages', { method: 'POST' });
+        const res = await fetch('/api/sync_one', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentChat.username })
+        });
         const data = await res.json();
 
         if (data.success) {
-            status.textContent = `✅ +${data.total_saved} новых сообщений в ${data.chats} чатах`;
+            status.textContent = `✅ ${name}: +${data.saved} новых сообщений`;
             setTimeout(() => updateSyncStatus(), 3000);
             // Refresh session data
             await refresh();
@@ -1146,6 +1312,82 @@ async function syncMessages() {
     } finally {
         btn.disabled = false;
         btn.textContent = '🔄 Синхр.';
+    }
+}
+
+// Развернуть ответ /api/sessions в плоский список чатов
+function flattenSessions(data) {
+    if (Array.isArray(data)) return data;
+    return [
+        ...(data.groups || []),
+        ...(data.officials || []),
+        ...(data.system_chats || []),
+        ...(data.users || []),
+    ];
+}
+
+// Последовательная синхронизация всех закреплённых чатов один за одним
+let syncAllRunning = false;
+
+async function syncAllSequentially() {
+    if (syncAllRunning) return;
+    syncAllRunning = true;
+
+    const btn = document.getElementById('sync-all-btn');
+    const status = document.getElementById('sync-status');
+    const syncBtn = document.getElementById('sync-btn');
+    btn.disabled = true;
+    syncBtn.disabled = true;
+
+    try {
+        // 1. Получить список закреплённых чатов
+        const res = await fetch('/api/sessions');
+        const data = await res.json();
+        const sessions = flattenSessions(data);
+        const pinned = sessions.filter(s => s.is_pinned).map(s => s.username);
+
+        if (!pinned.length) {
+            status.textContent = 'Нет закреплённых чатов';
+            return;
+        }
+
+        let totalSaved = 0;
+        let errors = 0;
+
+        // 2. Синхронизировать один за одним
+        for (let i = 0; i < pinned.length; i++) {
+            const u = pinned[i];
+            const session = sessions.find(s => s.username === u);
+            const name = (session && (session.alias || session.nickname)) || u;
+            status.textContent = `⏳ [${i + 1}/${pinned.length}] ${name}...`;
+
+            try {
+                const r = await fetch('/api/sync_one', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u })
+                });
+                const d = await r.json();
+                if (d.success) {
+                    totalSaved += d.saved || 0;
+                    if (d.error) errors++;
+                } else {
+                    errors++;
+                }
+            } catch (e) {
+                errors++;
+            }
+        }
+
+        status.textContent = `✅ Синхр. всё: +${totalSaved} сообщ., ошибок: ${errors}`;
+        setTimeout(() => updateSyncStatus(), 5000);
+        await refresh();
+    } catch (e) {
+        status.textContent = '❌ ' + e.message;
+    } finally {
+        btn.disabled = false;
+        syncBtn.disabled = false;
+        syncAllRunning = false;
     }
 }
 
@@ -1285,12 +1527,14 @@ updateSyncStatus();
 <div class="modal-overlay" id="global-prompt-modal">
     <div class="modal">
         <div class="modal-header">
-            <h2>Глобальный промт для ИИ</h2>
+            <h2>Глобальные промты для ИИ</h2>
             <button class="close-btn" onclick="closeGlobalPromptModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <label>Этот промт используется по умолчанию для всех чатов</label>
+            <label>Промт для анализа чатов (используется по умолчанию для всех чатов)</label>
             <textarea id="global-prompt-textarea"></textarea>
+            <label style="margin-top: 1rem;">Промт для «анализа анализов» (мета-анализ всех чатов)</label>
+            <textarea id="meta-prompt-textarea"></textarea>
         </div>
         <div class="modal-footer">
             <button class="btn-cancel" onclick="closeGlobalPromptModal()">Отмена</button>
@@ -1369,8 +1613,9 @@ async function loadPromptData() {
 
 function openGlobalPromptModal() {
     loadPromptData().then(() => {
-        if (promptData && promptData.global_prompt) {
-            document.getElementById('global-prompt-textarea').value = promptData.global_prompt;
+        if (promptData) {
+            document.getElementById('global-prompt-textarea').value = promptData.global_prompt || '';
+            document.getElementById('meta-prompt-textarea').value = promptData.meta_prompt || '';
         }
         document.getElementById('global-prompt-modal').classList.add('show');
     });
@@ -1386,15 +1631,16 @@ async function saveGlobalPrompt() {
         alert('Промт не может быть пустым');
         return;
     }
+    const metaPrompt = document.getElementById('meta-prompt-textarea').value.trim();
     const res = await fetch('/api/update_global_prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, meta_prompt: metaPrompt })
     });
     const result = await res.json();
     if (result.success) {
         closeGlobalPromptModal();
-        alert('Глобальный промт сохранён');
+        alert('Промты сохранены');
     } else {
         alert('Ошибка: ' + (result.error || 'unknown'));
     }

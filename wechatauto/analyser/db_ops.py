@@ -267,6 +267,27 @@ def save_meta_analys(analys: str, chats_count: int) -> None:
         session.close()
 
 
+def get_last_meta_analys() -> Optional[dict]:
+    """Получить последний сохранённый общий анализ (мета-анализ)."""
+    session = get_session()
+    try:
+        from ..history_db import MetaAnalysis
+        row = (
+            session.query(MetaAnalysis)
+            .order_by(MetaAnalysis.created_at.desc())
+            .first()
+        )
+        if row:
+            return {
+                "analysis": row.analysis,
+                "chats_analyzed": row.chats_analyzed,
+                "created_at": row.created_at,
+            }
+        return None
+    finally:
+        session.close()
+
+
 def get_recent_analyses(username: str, limit: int = 3, exclude_current: bool = True) -> List[dict]:
     """Получить N последних предыдущих анализов для чата.
     

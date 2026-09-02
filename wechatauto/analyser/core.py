@@ -97,6 +97,33 @@ def _build_message_link(msg_id: int) -> str:
     return f"[#msg:{msg_id}]"
 
 
+def _build_chat_header(username: str) -> str:
+    """Собрать шапку чата для промпта: имя, ID, тег."""
+    from ..history_db import get_session, ChatSetting
+
+    display = db_ops.get_chat_display_name(username)
+    session = get_session()
+    try:
+        row = (
+            session.query(ChatSetting.tags)
+            .filter_by(username=username)
+            .first()
+        )
+        tags = (row[0] if row else None) or ""
+    finally:
+        session.close()
+
+    is_group = "@chatroom" in username
+    parts = [
+        f"Название чата: {display}",
+        f"ID чата: {username}",
+        f"Тип: {'групповой чат' if is_group else 'личный чат'}",
+    ]
+    if tags.strip():
+        parts.append(f"Теги: {tags.strip()}")
+    return "=== Информация о чате ===\n" + "\n".join(parts)
+
+
 def _build_chat_link(username: str) -> str:
     """Создать текстовую ссылку на чат для LLM."""
     return f"[chat:{username}]"
@@ -164,7 +191,8 @@ def run_analys(username: str, force: bool = False) -> dict:
                         f"=== Старый анализ #{i} (дата: {ana_date}) ===\n{ana['analysis']}"
                     )
                 user_prompt = (
-                    "--- Предыдущие анализы (контекст, не переписывай их целиком) ---\n"
+                    _build_chat_header(username)
+                    + "\n\n--- Предыдущие анализы (контекст, не переписывай их целиком) ---\n"
                     + "\n\n".join(recent_sections)
                     + "\n\n=== Сообщения чата ===\n"
                     + _format_messages(new_msgs, username)
@@ -173,8 +201,12 @@ def run_analys(username: str, force: bool = False) -> dict:
                       "не закрыты по сообщениям."
                 )
             else:
-                user_prompt = prompts.USER_FIRST_ANALYS_TEMPLATE.format(
-                    messages=_format_messages(new_msgs, username),
+                user_prompt = (
+                    _build_chat_header(username)
+                    + "\n\n"
+                    + prompts.USER_FIRST_ANALYS_TEMPLATE.format(
+                        messages=_format_messages(new_msgs, username),
+                    )
                 )
         elif current_analys:
             # Есть предыдущий анализ — обновляем
@@ -191,7 +223,7 @@ def run_analys(username: str, force: bool = False) -> dict:
                 )
             
             # Собираем полный промпт
-            user_prompt_sections = []
+            user_prompt_sections = [_build_chat_header(username)]
             if recent_analyses_text:
                 user_prompt_sections.append("\n".join(recent_analyses_text))
             user_prompt_sections.append(f"=== Текущий анализ на дату {now_str} ===\n{current_analys}")
@@ -202,8 +234,12 @@ def run_analys(username: str, force: bool = False) -> dict:
         else:
             # Первый анализ — все сообщения
             system_prompt = prompts.SYSTEM_FIRST_ANALYS
-            user_prompt = prompts.USER_FIRST_ANALYS_TEMPLATE.format(
-                messages=_format_messages(new_msgs, username),
+            user_prompt = (
+                _build_chat_header(username)
+                + "\n\n"
+                + prompts.USER_FIRST_ANALYS_TEMPLATE.format(
+                    messages=_format_messages(new_msgs, username),
+                )
             )
 
         # 3.1 Добавить промпт пользователя из БД (приоритет в оформлении ответа)
@@ -286,10 +322,18 @@ def run_meta_analys() -> dict:
 
         full_text = "\n\n".join(analyses_text)
 
-        # 3. Отправить в LLM
+        # 3. Отправить в LLM — с промптом пользователя из БД
+        from ..history_db import get_meta_prompt
+
+        meta_user_prompt = (
+            get_meta_prompt()
+            + "\n\n=== Анализы чатов ===\n"
+            + full_text
+            + "\n\nСсылки на чаты вида [chat:username] сохраняй как есть."
+        )
         llm_result = chat_completion(
             prompts.SYSTEM_META_ANALYS,
-            prompts.USER_META_ANALYS_TEMPLATE.format(analyses=full_text),
+            meta_user_prompt,
         )
         meta_analys = llm_result["content"]
         token_usage = llm_result["usage"]
